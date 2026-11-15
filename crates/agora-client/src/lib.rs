@@ -55,12 +55,15 @@ pub fn parse_server_url(input: &str) -> Result<Url> {
         input.to_owned()
     } else {
         let host = input.split([':', '/']).next().unwrap_or_default();
-        let local = matches!(host, "localhost" | "127.0.0.1" | "[::1]") || host.ends_with(".localhost");
+        let local =
+            matches!(host, "localhost" | "127.0.0.1" | "[::1]") || host.ends_with(".localhost");
         format!("{}://{input}", if local { "http" } else { "https" })
     };
     let url = Url::parse(&with_scheme).map_err(|e| ClientError::InvalidUrl(e.to_string()))?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err(ClientError::InvalidUrl("use an http or https address".into()));
+        return Err(ClientError::InvalidUrl(
+            "use an http or https address".into(),
+        ));
     }
     Ok(url)
 }
@@ -68,7 +71,10 @@ pub fn parse_server_url(input: &str) -> Result<Url> {
 /// Whether credentials sent to `url` would cross a network unencrypted.
 pub fn is_insecure(url: &Url) -> bool {
     url.scheme() == "http"
-        && !matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]" | "::1"))
+        && !matches!(
+            url.host_str(),
+            Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+        )
 }
 
 /// An HTTP client for one server, with or without a session.
@@ -87,7 +93,11 @@ impl Client {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| ClientError::Network(e.to_string()))?;
-        Ok(Client { http, base, token: None })
+        Ok(Client {
+            http,
+            base,
+            token: None,
+        })
     }
 
     pub fn with_token(mut self, token: impl Into<String>) -> Client {
@@ -107,7 +117,8 @@ impl Client {
     pub fn ws_url(&self) -> Result<Url> {
         let mut url = self.base.clone();
         let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
-        url.set_scheme(scheme).map_err(|()| ClientError::InvalidUrl("cannot derive the WebSocket address".into()))?;
+        url.set_scheme(scheme)
+            .map_err(|()| ClientError::InvalidUrl("cannot derive the WebSocket address".into()))?;
         url.set_path(WS_PATH);
         Ok(url)
     }
@@ -131,18 +142,35 @@ impl Client {
         if let Some(body) = body {
             req = req.json(body);
         }
-        let res = req.send().await.map_err(|e| ClientError::Network(e.without_url().to_string()))?;
+        let res = req
+            .send()
+            .await
+            .map_err(|e| ClientError::Network(e.without_url().to_string()))?;
         let status = res.status();
-        let bytes = res.bytes().await.map_err(|e| ClientError::Network(e.without_url().to_string()))?;
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| ClientError::Network(e.without_url().to_string()))?;
         if !status.is_success() {
             let error = serde_json::from_slice::<ApiError>(&bytes).unwrap_or(ApiError {
-                code: if status == StatusCode::UNAUTHORIZED { ErrorCode::Unauthenticated } else { ErrorCode::Internal },
+                code: if status == StatusCode::UNAUTHORIZED {
+                    ErrorCode::Unauthenticated
+                } else {
+                    ErrorCode::Internal
+                },
                 message: format!("the server answered {status}"),
                 field: None,
             });
-            return Err(ClientError::Api { status: status.as_u16(), error });
+            return Err(ClientError::Api {
+                status: status.as_u16(),
+                error,
+            });
         }
-        let bytes = if bytes.is_empty() { &b"null"[..] } else { &bytes[..] };
+        let bytes = if bytes.is_empty() {
+            &b"null"[..]
+        } else {
+            &bytes[..]
+        };
         serde_json::from_slice(bytes).map_err(|e| ClientError::Decode(e.to_string()))
     }
 
@@ -150,7 +178,11 @@ impl Client {
         self.send::<(), T>(Method::GET, self.url(path)?, None).await
     }
 
-    async fn post<B: Serialize + ?Sized, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T> {
+    async fn post<B: Serialize + ?Sized, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
         self.send(Method::POST, self.url(path)?, Some(body)).await
     }
 
@@ -167,7 +199,10 @@ impl Client {
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<(Client, SessionResponse)> {
-        let req = LoginRequest { username: username.to_owned(), password: password.to_owned() };
+        let req = LoginRequest {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        };
         let session: SessionResponse = self.post("/auth/login", &req).await?;
         Ok((self.clone().with_token(session.token.clone()), session))
     }
@@ -182,7 +217,9 @@ impl Client {
     }
 
     pub async fn update_profile(&self, display_name: &str) -> Result<User> {
-        let req = UpdateProfileRequest { display_name: display_name.to_owned() };
+        let req = UpdateProfileRequest {
+            display_name: display_name.to_owned(),
+        };
         self.send(Method::PATCH, self.url("/me")?, Some(&req)).await
     }
 
@@ -193,19 +230,35 @@ impl Client {
     }
 
     pub async fn create_workspace(&self, name: &str) -> Result<Workspace> {
-        self.post("/workspaces", &CreateWorkspaceRequest { name: name.to_owned() }).await
+        self.post(
+            "/workspaces",
+            &CreateWorkspaceRequest {
+                name: name.to_owned(),
+            },
+        )
+        .await
     }
 
     pub async fn members(&self, ws: WorkspaceId) -> Result<Vec<Member>> {
         self.get(&format!("/workspaces/{ws}/members")).await
     }
 
-    pub async fn create_invite(&self, ws: WorkspaceId, req: &CreateInviteRequest) -> Result<Invite> {
+    pub async fn create_invite(
+        &self,
+        ws: WorkspaceId,
+        req: &CreateInviteRequest,
+    ) -> Result<Invite> {
         self.post(&format!("/workspaces/{ws}/invites"), req).await
     }
 
     pub async fn join_workspace(&self, code: &str) -> Result<Workspace> {
-        self.post("/workspaces/join", &JoinWorkspaceRequest { code: code.to_owned() }).await
+        self.post(
+            "/workspaces/join",
+            &JoinWorkspaceRequest {
+                code: code.to_owned(),
+            },
+        )
+        .await
     }
 
     // Channels --------------------------------------------------------------------------------
@@ -218,12 +271,25 @@ impl Client {
         self.get(&format!("/channels/{id}")).await
     }
 
-    pub async fn create_channel(&self, ws: WorkspaceId, req: &CreateChannelRequest) -> Result<Channel> {
+    pub async fn create_channel(
+        &self,
+        ws: WorkspaceId,
+        req: &CreateChannelRequest,
+    ) -> Result<Channel> {
         self.post(&format!("/workspaces/{ws}/channels"), req).await
     }
 
-    pub async fn update_channel(&self, id: ChannelId, req: &UpdateChannelRequest) -> Result<Channel> {
-        self.send(Method::PATCH, self.url(&format!("/channels/{id}"))?, Some(req)).await
+    pub async fn update_channel(
+        &self,
+        id: ChannelId,
+        req: &UpdateChannelRequest,
+    ) -> Result<Channel> {
+        self.send(
+            Method::PATCH,
+            self.url(&format!("/channels/{id}"))?,
+            Some(req),
+        )
+        .await
     }
 
     pub async fn join_channel(&self, id: ChannelId) -> Result<Channel> {
@@ -235,15 +301,29 @@ impl Client {
     }
 
     pub async fn add_channel_member(&self, id: ChannelId, user: UserId) -> Result<Channel> {
-        self.post(&format!("/channels/{id}/members"), &AddChannelMemberRequest { user_id: user }).await
+        self.post(
+            &format!("/channels/{id}/members"),
+            &AddChannelMemberRequest { user_id: user },
+        )
+        .await
     }
 
     pub async fn open_direct(&self, ws: WorkspaceId, user: UserId) -> Result<Channel> {
-        self.post(&format!("/workspaces/{ws}/direct"), &OpenDirectRequest { user_id: user }).await
+        self.post(
+            &format!("/workspaces/{ws}/direct"),
+            &OpenDirectRequest { user_id: user },
+        )
+        .await
     }
 
     pub async fn mark_read(&self, id: ChannelId, message: MessageId) -> Result<()> {
-        self.post(&format!("/channels/{id}/read"), &MarkReadRequest { message_id: message }).await
+        self.post(
+            &format!("/channels/{id}/read"),
+            &MarkReadRequest {
+                message_id: message,
+            },
+        )
+        .await
     }
 
     // Messages --------------------------------------------------------------------------------
@@ -278,12 +358,20 @@ impl Client {
     }
 
     pub async fn edit_message(&self, id: MessageId, body: &str) -> Result<Message> {
-        let req = EditMessageRequest { body: body.to_owned() };
-        self.send(Method::PATCH, self.url(&format!("/messages/{id}"))?, Some(&req)).await
+        let req = EditMessageRequest {
+            body: body.to_owned(),
+        };
+        self.send(
+            Method::PATCH,
+            self.url(&format!("/messages/{id}"))?,
+            Some(&req),
+        )
+        .await
     }
 
     pub async fn delete_message(&self, id: MessageId) -> Result<()> {
-        self.send::<(), _>(Method::DELETE, self.url(&format!("/messages/{id}"))?, None).await
+        self.send::<(), _>(Method::DELETE, self.url(&format!("/messages/{id}"))?, None)
+            .await
     }
 
     pub async fn thread(&self, id: MessageId) -> Result<Thread> {
@@ -291,7 +379,13 @@ impl Client {
     }
 
     pub async fn react(&self, id: MessageId, emoji: &str) -> Result<Vec<Reaction>> {
-        self.post(&format!("/messages/{id}/reactions"), &ReactRequest { emoji: emoji.to_owned() }).await
+        self.post(
+            &format!("/messages/{id}/reactions"),
+            &ReactRequest {
+                emoji: emoji.to_owned(),
+            },
+        )
+        .await
     }
 
     pub async fn search(&self, ws: WorkspaceId, query: &str) -> Result<SearchResults> {
@@ -314,9 +408,18 @@ mod tests {
 
     #[test]
     fn server_addresses() {
-        assert_eq!(parse_server_url("localhost:7878").unwrap().as_str(), "http://localhost:7878/");
-        assert_eq!(parse_server_url("chat.example.com").unwrap().as_str(), "https://chat.example.com/");
-        assert_eq!(parse_server_url("http://10.0.0.2:7878/").unwrap().port(), Some(7878));
+        assert_eq!(
+            parse_server_url("localhost:7878").unwrap().as_str(),
+            "http://localhost:7878/"
+        );
+        assert_eq!(
+            parse_server_url("chat.example.com").unwrap().as_str(),
+            "https://chat.example.com/"
+        );
+        assert_eq!(
+            parse_server_url("http://10.0.0.2:7878/").unwrap().port(),
+            Some(7878)
+        );
         assert!(parse_server_url("ftp://x").is_err());
         assert!(parse_server_url("").is_err());
     }
@@ -324,14 +427,19 @@ mod tests {
     #[test]
     fn plain_http_is_only_fine_on_this_machine() {
         assert!(!is_insecure(&parse_server_url("localhost:7878").unwrap()));
-        assert!(is_insecure(&parse_server_url("http://10.0.0.2:7878").unwrap()));
+        assert!(is_insecure(
+            &parse_server_url("http://10.0.0.2:7878").unwrap()
+        ));
         assert!(!is_insecure(&parse_server_url("chat.example.com").unwrap()));
     }
 
     #[test]
     fn websocket_address_follows_the_scheme() {
         let c = Client::new(parse_server_url("chat.example.com").unwrap()).unwrap();
-        assert_eq!(c.ws_url().unwrap().as_str(), "wss://chat.example.com/api/v1/ws");
+        assert_eq!(
+            c.ws_url().unwrap().as_str(),
+            "wss://chat.example.com/api/v1/ws"
+        );
     }
 
     #[test]

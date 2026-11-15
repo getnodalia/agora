@@ -68,7 +68,11 @@ impl Store {
             .create_if_missing(true)
             .foreign_keys(true)
             .busy_timeout(Duration::from_secs(5))
-            .journal_mode(if memory { SqliteJournalMode::Memory } else { SqliteJournalMode::Wal })
+            .journal_mode(if memory {
+                SqliteJournalMode::Memory
+            } else {
+                SqliteJournalMode::Wal
+            })
             .synchronous(SqliteSynchronous::Normal);
         // An in-memory database exists per connection, so it must have exactly one.
         let pool = SqlitePoolOptions::new()

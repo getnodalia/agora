@@ -33,16 +33,23 @@ impl Store {
         .fetch_one(&self.pool)
         .await
         .map_err(conflict)?;
-        Ok(User { id: UserId(id), username: username.to_owned(), display_name: display_name.to_owned() })
+        Ok(User {
+            id: UserId(id),
+            username: username.to_owned(),
+            display_name: display_name.to_owned(),
+        })
     }
 
     /// The user and their password hash, for logging in.
     pub async fn user_credentials(&self, username: &str) -> Result<Option<(User, String)>> {
-        let row = sqlx::query("SELECT id, username, display_name, password_hash FROM users WHERE username = ?")
-            .bind(username)
-            .fetch_optional(&self.pool)
-            .await?;
-        row.map(|r| Ok((rows::user(&r, "")?, r.try_get("password_hash")?))).transpose()
+        let row = sqlx::query(
+            "SELECT id, username, display_name, password_hash FROM users WHERE username = ?",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| Ok((rows::user(&r, "")?, r.try_get("password_hash")?)))
+            .transpose()
     }
 
     pub async fn user(&self, id: UserId) -> Result<Option<User>> {
@@ -54,7 +61,9 @@ impl Store {
     }
 
     pub async fn user_count(&self) -> Result<i64> {
-        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&self.pool).await?)
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await?)
     }
 
     pub async fn set_display_name(&self, id: UserId, display_name: &str) -> Result<()> {
@@ -98,7 +107,11 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         row.map(|r| {
-            Ok(SessionRow { id: r.try_get("session_id")?, user: rows::user(&r, "")?, expires_at: r.try_get("expires_at")? })
+            Ok(SessionRow {
+                id: r.try_get("session_id")?,
+                user: rows::user(&r, "")?,
+                expires_at: r.try_get("expires_at")?,
+            })
         })
         .transpose()
     }
@@ -116,13 +129,19 @@ impl Store {
 
     /// Delete a session. Returns its id when it existed.
     pub async fn delete_session(&self, token_hash: &[u8]) -> Result<Option<i64>> {
-        Ok(sqlx::query_scalar("DELETE FROM sessions WHERE token_hash = ? RETURNING id")
-            .bind(token_hash)
-            .fetch_optional(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("DELETE FROM sessions WHERE token_hash = ? RETURNING id")
+                .bind(token_hash)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn delete_expired_sessions(&self, now: Timestamp) -> Result<u64> {
-        Ok(sqlx::query("DELETE FROM sessions WHERE expires_at <= ?").bind(now).execute(&self.pool).await?.rows_affected())
+        Ok(sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
+            .bind(now)
+            .execute(&self.pool)
+            .await?
+            .rows_affected())
     }
 }

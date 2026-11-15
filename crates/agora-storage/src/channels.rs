@@ -85,18 +85,25 @@ impl Store {
 
     /// Whether `user` is a member of the channel.
     pub async fn is_channel_member(&self, channel: ChannelId, user: UserId) -> Result<bool> {
-        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM channel_members WHERE channel_id = ? AND user_id = ?")
-            .bind(channel.0)
-            .bind(user.0)
-            .fetch_one(&self.pool)
-            .await?;
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM channel_members WHERE channel_id = ? AND user_id = ?",
+        )
+        .bind(channel.0)
+        .bind(user.0)
+        .fetch_one(&self.pool)
+        .await?;
         Ok(n > 0)
     }
 
     /// The channels `user` sees in a workspace: the ones they belong to, plus (unless they are a
     /// guest) every public channel, each with their unread counts. One query, plus one for the
     /// peers of direct conversations.
-    pub async fn channels_for(&self, workspace: WorkspaceId, user: UserId, role: Role) -> Result<Vec<Channel>> {
+    pub async fn channels_for(
+        &self,
+        workspace: WorkspaceId,
+        user: UserId,
+        role: Role,
+    ) -> Result<Vec<Channel>> {
         let sql = format!(
             "{CHANNEL_SELECT} WHERE c.workspace_id = ?2 AND (cm.user_id IS NOT NULL OR (c.kind = 'public' AND ?3))
              ORDER BY c.kind, c.name"
@@ -123,7 +130,11 @@ impl Store {
     /// One channel as `user` sees it (without checking that they may).
     pub async fn channel_view(&self, channel: ChannelId, user: UserId) -> Result<Option<Channel>> {
         let sql = format!("{CHANNEL_SELECT} WHERE c.id = ?2");
-        let row = sqlx::query(&sql).bind(user.0).bind(channel.0).fetch_optional(&self.pool).await?;
+        let row = sqlx::query(&sql)
+            .bind(user.0)
+            .bind(channel.0)
+            .fetch_optional(&self.pool)
+            .await?;
         let Some(row) = row else { return Ok(None) };
         let mut c = channel_view(&row)?;
         if c.kind == ChannelKind::Direct {
@@ -135,7 +146,11 @@ impl Store {
         Ok(Some(c))
     }
 
-    async fn direct_peers(&self, workspace: WorkspaceId, user: UserId) -> Result<HashMap<ChannelId, User>> {
+    async fn direct_peers(
+        &self,
+        workspace: WorkspaceId,
+        user: UserId,
+    ) -> Result<HashMap<ChannelId, User>> {
         let rows = sqlx::query(
             "SELECT other.channel_id, u.id, u.username, u.display_name
              FROM channel_members me
@@ -148,7 +163,9 @@ impl Store {
         .bind(user.0)
         .fetch_all(&self.pool)
         .await?;
-        rows.iter().map(|r| Ok((ChannelId(r.try_get("channel_id")?), rows::user(r, "")?))).collect()
+        rows.iter()
+            .map(|r| Ok((ChannelId(r.try_get("channel_id")?), rows::user(r, "")?)))
+            .collect()
     }
 
     /// Create a public or private channel; its creator joins it.
@@ -162,7 +179,9 @@ impl Store {
         now: Timestamp,
     ) -> Result<ChannelId> {
         if kind == ChannelKind::Direct {
-            return Err(StoreError::Corrupt("direct conversations are opened, not created".into()));
+            return Err(StoreError::Corrupt(
+                "direct conversations are opened, not created".into(),
+            ));
         }
         let mut tx = self.pool.begin().await?;
         let id: i64 = sqlx::query_scalar(
@@ -178,26 +197,35 @@ impl Store {
         .fetch_one(&mut *tx)
         .await
         .map_err(conflict)?;
-        sqlx::query("INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)")
-            .bind(id)
-            .bind(by.0)
-            .bind(now)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)",
+        )
+        .bind(id)
+        .bind(by.0)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(ChannelId(id))
     }
 
     /// Find or create the direct conversation between two members of a workspace.
-    pub async fn open_direct(&self, workspace: WorkspaceId, a: UserId, b: UserId, now: Timestamp) -> Result<ChannelId> {
+    pub async fn open_direct(
+        &self,
+        workspace: WorkspaceId,
+        a: UserId,
+        b: UserId,
+        now: Timestamp,
+    ) -> Result<ChannelId> {
         let key = format!("{}:{}", a.0.min(b.0), a.0.max(b.0));
         let mut tx = self.pool.begin().await?;
-        let existing: Option<i64> =
-            sqlx::query_scalar("SELECT id FROM channels WHERE workspace_id = ? AND kind = 'direct' AND direct_key = ?")
-                .bind(workspace.0)
-                .bind(&key)
-                .fetch_optional(&mut *tx)
-                .await?;
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM channels WHERE workspace_id = ? AND kind = 'direct' AND direct_key = ?",
+        )
+        .bind(workspace.0)
+        .bind(&key)
+        .fetch_optional(&mut *tx)
+        .await?;
         let id = match existing {
             Some(id) => id,
             None => {
@@ -228,7 +256,12 @@ impl Store {
     }
 
     /// Add a member, read up to the latest message. Returns false when they already were one.
-    pub async fn join_channel(&self, channel: ChannelId, user: UserId, now: Timestamp) -> Result<bool> {
+    pub async fn join_channel(
+        &self,
+        channel: ChannelId,
+        user: UserId,
+        now: Timestamp,
+    ) -> Result<bool> {
         let done = sqlx::query(
             "INSERT OR IGNORE INTO channel_members (channel_id, user_id, joined_at, last_read_id)
              VALUES (?1, ?2, ?3, COALESCE((SELECT MAX(id) FROM messages WHERE channel_id = ?1), 0))",
@@ -293,7 +326,12 @@ impl Store {
     }
 
     /// Move the read marker forward (never back). Returns the marker now stored.
-    pub async fn mark_read(&self, channel: ChannelId, user: UserId, message: MessageId) -> Result<Option<MessageId>> {
+    pub async fn mark_read(
+        &self,
+        channel: ChannelId,
+        user: UserId,
+        message: MessageId,
+    ) -> Result<Option<MessageId>> {
         let v: Option<i64> = sqlx::query_scalar(
             "UPDATE channel_members SET last_read_id = MAX(last_read_id, ?)
              WHERE channel_id = ? AND user_id = ? RETURNING last_read_id",

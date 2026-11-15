@@ -75,10 +75,16 @@ pub fn parse(body: &str) -> Vec<Block> {
             }
             // An unclosed fence still shows as code: that is what the author meant.
             let _ = closed;
-            blocks.push(Block::Code { lang, code: code.join("\n") });
+            blocks.push(Block::Code {
+                lang,
+                code: code.join("\n"),
+            });
             continue;
         }
-        if let Some(rest) = line.strip_prefix("> ").or_else(|| (line == ">").then_some("")) {
+        if let Some(rest) = line
+            .strip_prefix("> ")
+            .or_else(|| (line == ">").then_some(""))
+        {
             flush(&mut blocks, &mut para, false);
             quote.push(rest);
             continue;
@@ -138,7 +144,11 @@ pub fn inline(text: &str) -> Vec<Inline> {
         } else if let Some(m) = ["**", "~~"].into_iter().find(|m| rest.starts_with(m)) {
             if let Some(end) = closing(text, i + 2, m) {
                 let inner = text.get(i + 2..end).unwrap_or_default().to_owned();
-                let span = if m == "**" { Inline::Bold(inner) } else { Inline::Strike(inner) };
+                let span = if m == "**" {
+                    Inline::Bold(inner)
+                } else {
+                    Inline::Strike(inner)
+                };
                 matched = Some((span, end + 2));
             }
         } else if (rest.starts_with('*') || rest.starts_with('_'))
@@ -164,9 +174,12 @@ pub fn inline(text: &str) -> Vec<Inline> {
                 matched = Some((Inline::Mention(name.to_lowercase()), i + len));
             }
         } else if !prev.is_some_and(is_word_char)
-            && ["https://", "http://", "mailto:"]
-                .iter()
-                .any(|s| rest.len() > s.len() && rest.get(..s.len()).is_some_and(|p| p.eq_ignore_ascii_case(s)))
+            && ["https://", "http://", "mailto:"].iter().any(|s| {
+                rest.len() > s.len()
+                    && rest
+                        .get(..s.len())
+                        .is_some_and(|p| p.eq_ignore_ascii_case(s))
+            })
         {
             let mut url: String = rest
                 .chars()
@@ -237,7 +250,10 @@ mod tests {
 
     #[test]
     fn plain_text_is_one_paragraph() {
-        assert_eq!(parse("hola\nmundo"), vec![Block::Paragraph(vec![Text("hola\nmundo".into())])]);
+        assert_eq!(
+            parse("hola\nmundo"),
+            vec![Block::Paragraph(vec![Text("hola\nmundo".into())])]
+        );
     }
 
     #[test]
@@ -258,7 +274,13 @@ mod tests {
 
     #[test]
     fn unclosed_fence_is_still_code() {
-        assert_eq!(parse("```\nlet x = 1;"), vec![Block::Code { lang: None, code: "let x = 1;".into() }]);
+        assert_eq!(
+            parse("```\nlet x = 1;"),
+            vec![Block::Code {
+                lang: None,
+                code: "let x = 1;".into()
+            }]
+        );
     }
 
     #[test]
@@ -283,16 +305,26 @@ mod tests {
     #[test]
     fn arithmetic_and_snake_case_are_not_italic() {
         assert_eq!(inline("2 * 3 * 4"), vec![Text("2 * 3 * 4".into())]);
-        assert_eq!(inline("snake_case_name"), vec![Text("snake_case_name".into())]);
+        assert_eq!(
+            inline("snake_case_name"),
+            vec![Text("snake_case_name".into())]
+        );
     }
 
     #[test]
     fn only_safe_link_schemes() {
         assert_eq!(
             inline("ver https://getnodalia.com/agora."),
-            vec![Text("ver ".into()), Link("https://getnodalia.com/agora".into()), Text(".".into())]
+            vec![
+                Text("ver ".into()),
+                Link("https://getnodalia.com/agora".into()),
+                Text(".".into())
+            ]
         );
-        assert_eq!(inline("javascript:alert(1)"), vec![Text("javascript:alert(1)".into())]);
+        assert_eq!(
+            inline("javascript:alert(1)"),
+            vec![Text("javascript:alert(1)".into())]
+        );
     }
 
     #[test]
@@ -304,14 +336,20 @@ mod tests {
     fn quotes() {
         assert_eq!(
             parse("> citado\ndespués"),
-            vec![Block::Quote(vec![Text("citado".into())]), Block::Paragraph(vec![Text("después".into())])]
+            vec![
+                Block::Quote(vec![Text("citado".into())]),
+                Block::Paragraph(vec![Text("después".into())])
+            ]
         );
     }
 
     #[test]
     fn emails_are_not_mentions_and_mentions_are_deduplicated() {
         assert_eq!(mentions("ana@example.com"), Vec::<String>::new());
-        assert_eq!(mentions("@ana y @luis y @ana\n```\n@nadie\n```"), vec!["ana", "luis"]);
+        assert_eq!(
+            mentions("@ana y @luis y @ana\n```\n@nadie\n```"),
+            vec!["ana", "luis"]
+        );
     }
 
     #[test]

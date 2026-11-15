@@ -29,14 +29,21 @@ pub struct NewInvite<'a> {
 
 impl Store {
     /// Create a workspace owned by `owner`, with a default `#general` channel.
-    pub async fn create_workspace(&self, name: &str, owner: UserId, now: Timestamp) -> Result<WorkspaceId> {
+    pub async fn create_workspace(
+        &self,
+        name: &str,
+        owner: UserId,
+        now: Timestamp,
+    ) -> Result<WorkspaceId> {
         let mut tx = self.pool.begin().await?;
-        let id: i64 = sqlx::query_scalar("INSERT INTO workspaces (name, created_by, created_at) VALUES (?, ?, ?) RETURNING id")
-            .bind(name)
-            .bind(owner.0)
-            .bind(now)
-            .fetch_one(&mut *tx)
-            .await?;
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO workspaces (name, created_by, created_at) VALUES (?, ?, ?) RETURNING id",
+        )
+        .bind(name)
+        .bind(owner.0)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await?;
         sqlx::query("INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)")
             .bind(id)
             .bind(owner.0)
@@ -52,12 +59,14 @@ impl Store {
         .bind(now)
         .fetch_one(&mut *tx)
         .await?;
-        sqlx::query("INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)")
-            .bind(channel)
-            .bind(owner.0)
-            .bind(now)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)",
+        )
+        .bind(channel)
+        .bind(owner.0)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(WorkspaceId(id))
     }
@@ -85,16 +94,22 @@ impl Store {
 
     /// The user's role in a workspace, or `None` when they are not a member.
     pub async fn role(&self, workspace: WorkspaceId, user: UserId) -> Result<Option<Role>> {
-        let role: Option<String> = sqlx::query_scalar("SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
-            .bind(workspace.0)
-            .bind(user.0)
-            .fetch_optional(&self.pool)
-            .await?;
+        let role: Option<String> = sqlx::query_scalar(
+            "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+        )
+        .bind(workspace.0)
+        .bind(user.0)
+        .fetch_optional(&self.pool)
+        .await?;
         role.map(|r| rows::role(&r)).transpose()
     }
 
     pub async fn workspace(&self, id: WorkspaceId, user: UserId) -> Result<Option<Workspace>> {
-        Ok(self.workspaces_of(user).await?.into_iter().find(|w| w.id == id))
+        Ok(self
+            .workspaces_of(user)
+            .await?
+            .into_iter()
+            .find(|w| w.id == id))
     }
 
     pub async fn members(&self, workspace: WorkspaceId) -> Result<Vec<Member>> {
@@ -118,10 +133,12 @@ impl Store {
     }
 
     pub async fn member_count(&self, workspace: WorkspaceId) -> Result<i64> {
-        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?")
-            .bind(workspace.0)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?")
+                .bind(workspace.0)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     /// Everyone who shares at least one workspace with `user` (for presence).
@@ -139,15 +156,24 @@ impl Store {
     }
 
     pub async fn workspace_member_ids(&self, workspace: WorkspaceId) -> Result<Vec<UserId>> {
-        let ids: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM workspace_members WHERE workspace_id = ?")
-            .bind(workspace.0)
-            .fetch_all(&self.pool)
-            .await?;
+        let ids: Vec<i64> =
+            sqlx::query_scalar("SELECT user_id FROM workspace_members WHERE workspace_id = ?")
+                .bind(workspace.0)
+                .fetch_all(&self.pool)
+                .await?;
         Ok(ids.into_iter().map(UserId).collect())
     }
 
     pub async fn create_invite(&self, invite: NewInvite<'_>) -> Result<i64> {
-        let NewInvite { workspace, code_hash, role, by, max_uses, expires_at, now } = invite;
+        let NewInvite {
+            workspace,
+            code_hash,
+            role,
+            by,
+            max_uses,
+            expires_at,
+            now,
+        } = invite;
         Ok(sqlx::query_scalar(
             "INSERT INTO invites (workspace_id, code_hash, role, created_by, max_uses, expires_at, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -166,7 +192,12 @@ impl Store {
     /// Use an invitation: add the user to its workspace (and its default channels) in one
     /// transaction, counting the use. Unknown codes are [`StoreError::NotFound`]; expired or used
     /// up ones are [`StoreError::InviteExhausted`].
-    pub async fn redeem_invite(&self, code_hash: &[u8], user: UserId, now: Timestamp) -> Result<Joined> {
+    pub async fn redeem_invite(
+        &self,
+        code_hash: &[u8],
+        user: UserId,
+        now: Timestamp,
+    ) -> Result<Joined> {
         let mut tx = self.pool.begin().await?;
         let row = sqlx::query("SELECT id, workspace_id, role, max_uses, uses, expires_at FROM invites WHERE code_hash = ?")
             .bind(code_hash)
@@ -176,13 +207,19 @@ impl Store {
         let invite: i64 = row.try_get("id")?;
         let workspace = WorkspaceId(row.try_get("workspace_id")?);
         let role = rows::role(row.try_get("role")?)?;
-        let existing: Option<String> = sqlx::query_scalar("SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
-            .bind(workspace.0)
-            .bind(user.0)
-            .fetch_optional(&mut *tx)
-            .await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+        )
+        .bind(workspace.0)
+        .bind(user.0)
+        .fetch_optional(&mut *tx)
+        .await?;
         if let Some(existing) = existing {
-            return Ok(Joined { workspace_id: workspace, role: rows::role(&existing)?, new_member: false });
+            return Ok(Joined {
+                workspace_id: workspace,
+                role: rows::role(&existing)?,
+                new_member: false,
+            });
         }
         let uses: i64 = row.try_get("uses")?;
         let max_uses: i64 = row.try_get("max_uses")?;
@@ -190,14 +227,27 @@ impl Store {
         if uses >= max_uses || expires_at <= now {
             return Err(StoreError::InviteExhausted);
         }
-        sqlx::query("UPDATE invites SET uses = uses + 1 WHERE id = ?").bind(invite).execute(&mut *tx).await?;
+        sqlx::query("UPDATE invites SET uses = uses + 1 WHERE id = ?")
+            .bind(invite)
+            .execute(&mut *tx)
+            .await?;
         add_member(&mut tx, workspace, user, role, now).await?;
         tx.commit().await?;
-        Ok(Joined { workspace_id: workspace, role, new_member: true })
+        Ok(Joined {
+            workspace_id: workspace,
+            role,
+            new_member: true,
+        })
     }
 
     /// Add a member directly (used by tests and administration tools).
-    pub async fn add_member(&self, workspace: WorkspaceId, user: UserId, role: Role, now: Timestamp) -> Result<()> {
+    pub async fn add_member(
+        &self,
+        workspace: WorkspaceId,
+        user: UserId,
+        role: Role,
+        now: Timestamp,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         add_member(&mut tx, workspace, user, role, now).await?;
         tx.commit().await?;

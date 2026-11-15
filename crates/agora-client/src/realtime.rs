@@ -28,12 +28,20 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RealtimeEvent {
     /// Trying to connect (attempt 1 is the first).
-    Connecting { attempt: u32 },
+    Connecting {
+        attempt: u32,
+    },
     /// Authenticated; events follow. After a reconnection, catch up on history.
-    Connected { user: User, reconnected: bool },
+    Connected {
+        user: User,
+        reconnected: bool,
+    },
     Event(ServerEvent),
     /// The connection dropped; another attempt follows after `retry_in`.
-    Disconnected { reason: String, retry_in: Duration },
+    Disconnected {
+        reason: String,
+        retry_in: Duration,
+    },
     /// The server refused the session. No more attempts are made.
     AuthRejected,
 }
@@ -81,7 +89,9 @@ enum End {
 }
 
 fn backoff(attempt: u32) -> Duration {
-    let base = BACKOFF_MIN.saturating_mul(1u32 << attempt.min(6)).min(BACKOFF_MAX);
+    let base = BACKOFF_MIN
+        .saturating_mul(1u32 << attempt.min(6))
+        .min(BACKOFF_MAX);
     let jitter = rand::thread_rng().gen_range(0.8..1.2);
     base.mul_f64(jitter)
 }
@@ -93,7 +103,9 @@ where
     let mut failures: u32 = 0;
     let mut connected_before = false;
     loop {
-        on_event(RealtimeEvent::Connecting { attempt: failures + 1 });
+        on_event(RealtimeEvent::Connecting {
+            attempt: failures + 1,
+        });
         match session(&client, &*on_event, &mut frames, connected_before).await {
             (End::Rejected, _) => {
                 on_event(RealtimeEvent::AuthRejected);
@@ -124,12 +136,19 @@ async fn session<F>(
 where
     F: Fn(RealtimeEvent),
 {
-    let Some(token) = client.token().map(str::to_owned) else { return (End::Rejected, false) };
+    let Some(token) = client.token().map(str::to_owned) else {
+        return (End::Rejected, false);
+    };
     let url = match client.ws_url() {
         Ok(u) => u,
         Err(e) => return (End::Dropped(e.to_string()), false),
     };
-    let socket = match timeout(Duration::from_secs(15), tokio_tungstenite::connect_async(url.as_str())).await {
+    let socket = match timeout(
+        Duration::from_secs(15),
+        tokio_tungstenite::connect_async(url.as_str()),
+    )
+    .await
+    {
         Ok(Ok((socket, _))) => socket,
         Ok(Err(e)) => return (End::Dropped(e.to_string()), false),
         Err(_) => return (End::Dropped("timed out".into()), false),

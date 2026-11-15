@@ -190,7 +190,11 @@ mod tests {
         for role in [Role::Owner, Role::Admin, Role::Member, Role::Guest] {
             assert_eq!(Role::parse(role.as_str()), Some(role));
         }
-        for kind in [ChannelKind::Public, ChannelKind::Private, ChannelKind::Direct] {
+        for kind in [
+            ChannelKind::Public,
+            ChannelKind::Private,
+            ChannelKind::Direct,
+        ] {
             assert_eq!(ChannelKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(Role::parse("root"), None);

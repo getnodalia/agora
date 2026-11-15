@@ -46,7 +46,9 @@ fn line(field: &'static str, value: &str, max: usize) -> Result<String, Validati
     if chars(v) > max {
         return Err(ValidationError::TooLong { field, max });
     }
-    if v.chars().any(|c| c == '\n' || c == '\t' || is_forbidden_control(c)) {
+    if v.chars()
+        .any(|c| c == '\n' || c == '\t' || is_forbidden_control(c))
+    {
         return Err(ValidationError::BadCharacters { field });
     }
     Ok(v.to_owned())
@@ -60,10 +62,16 @@ pub fn username(value: &str) -> Result<String, ValidationError> {
         return Err(ValidationError::Empty { field });
     }
     if chars(&v) < USERNAME_MIN {
-        return Err(ValidationError::TooShort { field, min: USERNAME_MIN });
+        return Err(ValidationError::TooShort {
+            field,
+            min: USERNAME_MIN,
+        });
     }
     if chars(&v) > USERNAME_MAX {
-        return Err(ValidationError::TooLong { field, max: USERNAME_MAX });
+        return Err(ValidationError::TooLong {
+            field,
+            max: USERNAME_MAX,
+        });
     }
     if !v
         .chars()
@@ -83,10 +91,16 @@ pub fn password(value: &str) -> Result<(), ValidationError> {
     let field = "password";
     let n = chars(value);
     if n < PASSWORD_MIN {
-        return Err(ValidationError::TooShort { field, min: PASSWORD_MIN });
+        return Err(ValidationError::TooShort {
+            field,
+            min: PASSWORD_MIN,
+        });
     }
     if n > PASSWORD_MAX {
-        return Err(ValidationError::TooLong { field, max: PASSWORD_MAX });
+        return Err(ValidationError::TooLong {
+            field,
+            max: PASSWORD_MAX,
+        });
     }
     Ok(())
 }
@@ -109,9 +123,15 @@ pub fn channel_name(value: &str) -> Result<String, ValidationError> {
         return Err(ValidationError::Empty { field });
     }
     if chars(&v) > CHANNEL_NAME_MAX {
-        return Err(ValidationError::TooLong { field, max: CHANNEL_NAME_MAX });
+        return Err(ValidationError::TooLong {
+            field,
+            max: CHANNEL_NAME_MAX,
+        });
     }
-    if !v.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+    if !v
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
         return Err(ValidationError::BadCharacters { field });
     }
     Ok(v)
@@ -136,7 +156,10 @@ pub fn message_body(value: &str) -> Result<String, ValidationError> {
         return Err(ValidationError::Empty { field });
     }
     if chars(v) > MESSAGE_MAX_CHARS {
-        return Err(ValidationError::TooLong { field, max: MESSAGE_MAX_CHARS });
+        return Err(ValidationError::TooLong {
+            field,
+            max: MESSAGE_MAX_CHARS,
+        });
     }
     if v.chars().any(is_forbidden_control) {
         return Err(ValidationError::BadCharacters { field });
@@ -152,9 +175,14 @@ pub fn reaction(value: &str) -> Result<String, ValidationError> {
         return Err(ValidationError::Empty { field });
     }
     if chars(v) > REACTION_MAX_CHARS {
-        return Err(ValidationError::TooLong { field, max: REACTION_MAX_CHARS });
+        return Err(ValidationError::TooLong {
+            field,
+            max: REACTION_MAX_CHARS,
+        });
     }
-    if v.chars().any(|c| c.is_whitespace() || is_forbidden_control(c) || c.is_ascii_alphanumeric()) {
+    if v.chars()
+        .any(|c| c.is_whitespace() || is_forbidden_control(c) || c.is_ascii_alphanumeric())
+    {
         return Err(ValidationError::BadCharacters { field });
     }
     Ok(v.to_owned())
@@ -167,9 +195,15 @@ pub fn nonce(value: &str) -> Result<String, ValidationError> {
         return Err(ValidationError::Empty { field });
     }
     if value.len() > NONCE_MAX {
-        return Err(ValidationError::TooLong { field, max: NONCE_MAX });
+        return Err(ValidationError::TooLong {
+            field,
+            max: NONCE_MAX,
+        });
     }
-    if !value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
         return Err(ValidationError::BadCharacters { field });
     }
     Ok(value.to_owned())

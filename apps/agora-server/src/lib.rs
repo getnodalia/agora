@@ -32,7 +32,9 @@ pub async fn build(config: Config) -> Result<(Router, AppState), agora_storage::
     let store = Store::open(&config.database).await?;
     let dummy_hash = auth::hash_password(auth::random_token(16))
         .await
-        .map_err(|_| agora_storage::StoreError::Corrupt("could not initialise password hashing".into()))?;
+        .map_err(|_| {
+            agora_storage::StoreError::Corrupt("could not initialise password hashing".into())
+        })?;
     let state = AppState {
         store,
         config: Arc::new(config),
@@ -50,8 +52,14 @@ pub fn router(state: AppState) -> Router {
         .nest(agora_protocol::API_PREFIX, routes::router())
         .route("/healthz", get(|| async { "ok" }))
         .layer(DefaultBodyLimit::max(max_body))
-        .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
-        .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -78,9 +86,12 @@ pub async fn serve(
     router: Router,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shutdown)
-        .await
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
 }
 
 /// Delete expired sessions every hour.

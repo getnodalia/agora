@@ -24,29 +24,52 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", post(accounts::login))
         .route("/auth/logout", post(accounts::logout))
         .route("/me", get(accounts::me).patch(accounts::update_me))
-        .route("/workspaces", get(workspaces::list).post(workspaces::create))
+        .route(
+            "/workspaces",
+            get(workspaces::list).post(workspaces::create),
+        )
         .route("/workspaces/join", post(workspaces::join))
         .route("/workspaces/{id}", get(workspaces::get_one))
         .route("/workspaces/{id}/members", get(workspaces::members))
         .route("/workspaces/{id}/invites", post(workspaces::create_invite))
-        .route("/workspaces/{id}/channels", get(channels::list).post(channels::create))
+        .route(
+            "/workspaces/{id}/channels",
+            get(channels::list).post(channels::create),
+        )
         .route("/workspaces/{id}/direct", post(channels::open_direct))
         .route("/workspaces/{id}/search", get(messages::search))
-        .route("/channels/{id}", get(channels::get_one).patch(channels::update))
+        .route(
+            "/channels/{id}",
+            get(channels::get_one).patch(channels::update),
+        )
         .route("/channels/{id}/join", post(channels::join))
         .route("/channels/{id}/leave", post(channels::leave))
         .route("/channels/{id}/members", post(channels::add_member))
         .route("/channels/{id}/read", post(channels::mark_read))
-        .route("/channels/{id}/messages", get(messages::history).post(messages::post))
-        .route("/messages/{id}", patch(messages::edit).delete(messages::delete))
+        .route(
+            "/channels/{id}/messages",
+            get(messages::history).post(messages::post),
+        )
+        .route(
+            "/messages/{id}",
+            patch(messages::edit).delete(messages::delete),
+        )
         .route("/messages/{id}/thread", get(messages::thread))
         .route("/messages/{id}/reactions", post(messages::react))
 }
 
 /// The caller's role in a workspace. Not being a member is "not found": a stranger learns
 /// nothing about which workspaces exist.
-pub async fn workspace_role(state: &AppState, workspace: WorkspaceId, user: UserId) -> AppResult<Role> {
-    state.store.role(workspace, user).await?.ok_or_else(AppError::not_found)
+pub async fn workspace_role(
+    state: &AppState,
+    workspace: WorkspaceId,
+    user: UserId,
+) -> AppResult<Role> {
+    state
+        .store
+        .role(workspace, user)
+        .await?
+        .ok_or_else(AppError::not_found)
 }
 
 /// Everything needed to decide what the caller may do in a channel.
@@ -59,20 +82,41 @@ pub struct ChannelAccess {
 
 impl ChannelAccess {
     pub fn can_post(&self) -> bool {
-        roles::can_post(self.role, self.channel.kind, self.member, self.channel.archived)
+        roles::can_post(
+            self.role,
+            self.channel.kind,
+            self.member,
+            self.channel.archived,
+        )
     }
 }
 
 /// Load a channel the caller may read, or answer "not found" (also for channels that exist but
 /// are private to others, or belong to another workspace).
-pub async fn channel_access(state: &AppState, channel: ChannelId, user: UserId) -> AppResult<ChannelAccess> {
-    let row = state.store.channel(channel).await?.ok_or_else(AppError::not_found)?;
-    let role = state.store.role(row.workspace_id, user).await?.ok_or_else(AppError::not_found)?;
+pub async fn channel_access(
+    state: &AppState,
+    channel: ChannelId,
+    user: UserId,
+) -> AppResult<ChannelAccess> {
+    let row = state
+        .store
+        .channel(channel)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    let role = state
+        .store
+        .role(row.workspace_id, user)
+        .await?
+        .ok_or_else(AppError::not_found)?;
     let member = state.store.is_channel_member(channel, user).await?;
     if !roles::can_read(role, row.kind, member) {
         return Err(AppError::not_found());
     }
-    Ok(ChannelAccess { channel: row, role, member })
+    Ok(ChannelAccess {
+        channel: row,
+        role,
+        member,
+    })
 }
 
 /// The client address used for rate limiting: the peer, or behind a trusted proxy, the last
@@ -93,7 +137,10 @@ pub fn client_ip(state: &AppState, peer: SocketAddr, headers: &HeaderMap) -> IpA
 
 /// Rate-limit a write (message, edit, reaction) by the caller.
 pub fn check_write(state: &AppState, user: UserId) -> AppResult<()> {
-    if state.limiter.allow(&format!("write:{user}"), state.config.limits.writes_per_minute) {
+    if state.limiter.allow(
+        &format!("write:{user}"),
+        state.config.limits.writes_per_minute,
+    ) {
         Ok(())
     } else {
         Err(AppError::rate_limited())

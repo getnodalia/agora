@@ -28,20 +28,35 @@ const RECHECK_SESSION_EVERY: Duration = Duration::from_secs(60);
 const TYPING_PER_MINUTE: u32 = 30;
 
 pub async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    ws.max_message_size(MAX_FRAME).max_frame_size(MAX_FRAME).on_upgrade(move |socket| handle(state, socket))
+    ws.max_message_size(MAX_FRAME)
+        .max_frame_size(MAX_FRAME)
+        .on_upgrade(move |socket| handle(state, socket))
 }
 
 fn json(event: &ServerEvent) -> WsMessage {
-    WsMessage::Text(Utf8Bytes::from(serde_json::to_string(event).unwrap_or_default()))
+    WsMessage::Text(Utf8Bytes::from(
+        serde_json::to_string(event).unwrap_or_default(),
+    ))
 }
 
 async fn reject(mut socket: WebSocket, code: ErrorCode, message: &str) {
-    let _ = socket.send(json(&ServerEvent::Error { code, message: message.to_owned() })).await;
+    let _ = socket
+        .send(json(&ServerEvent::Error {
+            code,
+            message: message.to_owned(),
+        }))
+        .await;
     // 4001 tells the client not to retry with this session; 1011 says try again later.
     let close = if code == ErrorCode::Unauthenticated {
-        CloseFrame { code: 4001, reason: Utf8Bytes::from_static("unauthenticated") }
+        CloseFrame {
+            code: 4001,
+            reason: Utf8Bytes::from_static("unauthenticated"),
+        }
     } else {
-        CloseFrame { code: 1011, reason: Utf8Bytes::from_static("try again later") }
+        CloseFrame {
+            code: 1011,
+            reason: Utf8Bytes::from_static("try again later"),
+        }
     };
     let _ = socket.send(WsMessage::Close(Some(close))).await;
 }
@@ -52,8 +67,12 @@ async fn authenticate(state: &AppState, socket: &mut WebSocket) -> Result<Option
         Ok(Some(Ok(frame))) => frame,
         _ => return Ok(None),
     };
-    let WsMessage::Text(text) = first else { return Ok(None) };
-    let Ok(ClientFrame::Auth { token }) = serde_json::from_str::<ClientFrame>(&text) else { return Ok(None) };
+    let WsMessage::Text(text) = first else {
+        return Ok(None);
+    };
+    let Ok(ClientFrame::Auth { token }) = serde_json::from_str::<ClientFrame>(&text) else {
+        return Ok(None);
+    };
     session_for_token(state, &token).await.map_err(|_| ())
 }
 
@@ -61,17 +80,36 @@ async fn handle(state: AppState, mut socket: WebSocket) {
     let auth = match authenticate(&state, &mut socket).await {
         Ok(Some(auth)) => auth,
         Ok(None) => {
-            reject(socket, ErrorCode::Unauthenticated, "invalid or expired session").await;
+            reject(
+                socket,
+                ErrorCode::Unauthenticated,
+                "invalid or expired session",
+            )
+            .await;
             return;
         }
         Err(()) => {
-            reject(socket, ErrorCode::Internal, "the server cannot check sessions right now").await;
+            reject(
+                socket,
+                ErrorCode::Internal,
+                "the server cannot check sessions right now",
+            )
+            .await;
             return;
         }
     };
     let user = auth.user.clone();
-    let Some(registered) = state.hub.register(user.id, auth.session_id, state.config.limits.connections_per_user) else {
-        reject(socket, ErrorCode::RateLimited, "too many connections for this account").await;
+    let Some(registered) = state.hub.register(
+        user.id,
+        auth.session_id,
+        state.config.limits.connections_per_user,
+    ) else {
+        reject(
+            socket,
+            ErrorCode::RateLimited,
+            "too many connections for this account",
+        )
+        .await;
         return;
     };
     let conn = registered.id;
@@ -82,7 +120,11 @@ async fn handle(state: AppState, mut socket: WebSocket) {
         announce_presence(&state, &auth, true).await;
     }
     let (mut sink, mut stream) = socket.split();
-    if sink.send(json(&ServerEvent::Ready { user: user.clone() })).await.is_err() {
+    if sink
+        .send(json(&ServerEvent::Ready { user: user.clone() }))
+        .await
+        .is_err()
+    {
         finish(&state, &auth, conn).await;
         return;
     }
@@ -151,7 +193,13 @@ async fn finish(state: &AppState, auth: &Auth, conn: u64) {
 
 async fn announce_presence(state: &AppState, auth: &Auth, online: bool) {
     if let Ok(colleagues) = state.store.colleagues(auth.user.id).await {
-        state.hub.send(&colleagues, &ServerEvent::Presence { user_id: auth.user.id, online });
+        state.hub.send(
+            &colleagues,
+            &ServerEvent::Presence {
+                user_id: auth.user.id,
+                online,
+            },
+        );
     }
 }
 
@@ -161,14 +209,33 @@ async fn relay_typing(
     channel: agora_core::ChannelId,
     thread_root_id: Option<agora_core::MessageId>,
 ) {
-    if !state.limiter.allow(&format!("typing:{}", auth.user.id), TYPING_PER_MINUTE) {
+    if !state
+        .limiter
+        .allow(&format!("typing:{}", auth.user.id), TYPING_PER_MINUTE)
+    {
         return;
     }
-    let Ok(access) = crate::routes::channel_access(state, channel, auth.user.id).await else { return };
-    if !roles::can_post(access.role, access.channel.kind, access.member, access.channel.archived) {
+    let Ok(access) = crate::routes::channel_access(state, channel, auth.user.id).await else {
+        return;
+    };
+    if !roles::can_post(
+        access.role,
+        access.channel.kind,
+        access.member,
+        access.channel.archived,
+    ) {
         return;
     }
-    let Ok(mut audience) = state.store.channel_audience(&access.channel).await else { return };
+    let Ok(mut audience) = state.store.channel_audience(&access.channel).await else {
+        return;
+    };
     audience.retain(|u| *u != auth.user.id);
-    state.hub.send(&audience, &ServerEvent::Typing { channel_id: channel, thread_root_id, user: auth.user.clone() });
+    state.hub.send(
+        &audience,
+        &ServerEvent::Typing {
+            channel_id: channel,
+            thread_root_id,
+            user: auth.user.clone(),
+        },
+    );
 }

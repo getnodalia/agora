@@ -33,7 +33,9 @@ pub fn token_hash(token: &str) -> Vec<u8> {
 pub async fn hash_password(password: String) -> Result<String, AppError> {
     tokio::task::spawn_blocking(move || {
         let salt = SaltString::generate(&mut OsRng);
-        Argon2::default().hash_password(password.as_bytes(), &salt).map(|h| h.to_string())
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
     })
     .await
     .map_err(|_| AppError::internal())?
@@ -48,7 +50,11 @@ pub async fn hash_password(password: String) -> Result<String, AppError> {
 pub async fn verify_password(password: String, hash: String) -> bool {
     tokio::task::spawn_blocking(move || {
         PasswordHash::new(&hash)
-            .map(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
+            .map(|parsed| {
+                Argon2::default()
+                    .verify_password(password.as_bytes(), &parsed)
+                    .is_ok()
+            })
             .unwrap_or(false)
     })
     .await
@@ -77,23 +83,39 @@ pub async fn session_for_token(state: &AppState, token: &str) -> Result<Option<A
     }
     let hash = token_hash(token);
     let now = now_ms();
-    let Some(session) = state.store.session(&hash, now).await? else { return Ok(None) };
+    let Some(session) = state.store.session(&hash, now).await? else {
+        return Ok(None);
+    };
     state.store.touch_session(session.id, now).await?;
-    Ok(Some(Auth { user: session.user, session_id: session.id, token_hash: hash }))
+    Ok(Some(Auth {
+        user: session.user,
+        session_id: session.id,
+        token_hash: hash,
+    }))
 }
 
 impl FromRequestParts<AppState> for Auth {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .ok_or_else(AppError::unauthenticated)?;
-        let token = header.strip_prefix("Bearer ").ok_or_else(AppError::unauthenticated)?;
-        let auth = session_for_token(state, token.trim()).await?.ok_or_else(AppError::unauthenticated)?;
-        if !state.limiter.allow(&format!("read:{}", auth.user.id), state.config.limits.reads_per_minute) {
+        let token = header
+            .strip_prefix("Bearer ")
+            .ok_or_else(AppError::unauthenticated)?;
+        let auth = session_for_token(state, token.trim())
+            .await?
+            .ok_or_else(AppError::unauthenticated)?;
+        if !state.limiter.allow(
+            &format!("read:{}", auth.user.id),
+            state.config.limits.reads_per_minute,
+        ) {
             return Err(AppError::rate_limited());
         }
         Ok(auth)

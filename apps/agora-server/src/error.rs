@@ -18,13 +18,24 @@ pub type AppResult<T> = Result<T, AppError>;
 
 impl AppError {
     pub fn new(status: StatusCode, code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { status, body: ApiError { code, message: message.into(), field: None } }
+        Self {
+            status,
+            body: ApiError {
+                code,
+                message: message.into(),
+                field: None,
+            },
+        }
     }
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, ErrorCode::Invalid, message)
     }
     pub fn unauthenticated() -> Self {
-        Self::new(StatusCode::UNAUTHORIZED, ErrorCode::Unauthenticated, "log in to continue")
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthenticated,
+            "log in to continue",
+        )
     }
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, ErrorCode::Forbidden, message)
@@ -37,10 +48,18 @@ impl AppError {
         Self::new(StatusCode::CONFLICT, ErrorCode::Conflict, message)
     }
     pub fn rate_limited() -> Self {
-        Self::new(StatusCode::TOO_MANY_REQUESTS, ErrorCode::RateLimited, "too many requests; try again shortly")
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            ErrorCode::RateLimited,
+            "too many requests; try again shortly",
+        )
     }
     pub fn internal() -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::Internal, "the server failed; see its log")
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCode::Internal,
+            "the server failed; see its log",
+        )
     }
 }
 
@@ -57,7 +76,11 @@ impl From<StoreError> for AppError {
         match e {
             StoreError::Conflict => AppError::conflict("it already exists"),
             StoreError::NotFound => AppError::not_found(),
-            StoreError::InviteExhausted => AppError::new(StatusCode::GONE, ErrorCode::NotFound, "this invitation has expired or been used up"),
+            StoreError::InviteExhausted => AppError::new(
+                StatusCode::GONE,
+                ErrorCode::NotFound,
+                "this invitation has expired or been used up",
+            ),
             other => {
                 tracing::error!(error = %other, "storage failure");
                 AppError::internal()

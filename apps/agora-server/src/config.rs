@@ -94,11 +94,21 @@ impl Default for Config {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("cannot read {path}: {source}")]
-    Read { path: String, source: std::io::Error },
+    Read {
+        path: String,
+        source: std::io::Error,
+    },
     #[error("{path} is not valid: {source}")]
-    Parse { path: String, source: Box<toml::de::Error> },
+    Parse {
+        path: String,
+        source: Box<toml::de::Error>,
+    },
     #[error("{name}={value:?} is not valid: {reason}")]
-    Env { name: &'static str, value: String, reason: String },
+    Env {
+        name: &'static str,
+        value: String,
+        reason: String,
+    },
     #[error(
         "refusing to listen on {0} without TLS: put a TLS reverse proxy in front and set \
          trust_proxy = true, or set allow_insecure_public_bind = true on an isolated network \
@@ -114,10 +124,14 @@ impl Config {
     pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
         let mut config = match path {
             Some(path) => {
-                let text = std::fs::read_to_string(path)
-                    .map_err(|source| ConfigError::Read { path: path.display().to_string(), source })?;
-                toml::from_str(&text)
-                    .map_err(|source| ConfigError::Parse { path: path.display().to_string(), source: Box::new(source) })?
+                let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+                    path: path.display().to_string(),
+                    source,
+                })?;
+                toml::from_str(&text).map_err(|source| ConfigError::Parse {
+                    path: path.display().to_string(),
+                    source: Box::new(source),
+                })?
             }
             None => Config::default(),
         };
@@ -128,11 +142,13 @@ impl Config {
 
     fn apply_env(&mut self, get: impl Fn(&str) -> Option<String>) -> Result<(), ConfigError> {
         if let Some(v) = get("AGORA_BIND") {
-            self.bind = v.parse().map_err(|e: std::net::AddrParseError| ConfigError::Env {
-                name: "AGORA_BIND",
-                value: v.clone(),
-                reason: e.to_string(),
-            })?;
+            self.bind = v
+                .parse()
+                .map_err(|e: std::net::AddrParseError| ConfigError::Env {
+                    name: "AGORA_BIND",
+                    value: v.clone(),
+                    reason: e.to_string(),
+                })?;
         }
         if let Some(v) = get("AGORA_DATABASE") {
             self.database = v;
@@ -174,6 +190,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_example_file_matches_the_defaults() {
+        let text = include_str!("../../../agora.example.toml");
+        let example: Config = toml::from_str(text).unwrap();
+        assert_eq!(format!("{example:?}"), format!("{:?}", Config::default()));
+    }
+
+    #[test]
     fn defaults_are_local_and_safe() {
         let c = Config::default();
         assert!(c.bind.ip().is_loopback());
@@ -182,7 +205,10 @@ mod tests {
 
     #[test]
     fn public_bind_needs_a_tls_proxy_or_an_explicit_opt_out() {
-        let mut c = Config { bind: "0.0.0.0:7878".parse().unwrap(), ..Config::default() };
+        let mut c = Config {
+            bind: "0.0.0.0:7878".parse().unwrap(),
+            ..Config::default()
+        };
         assert!(matches!(c.check(), Err(ConfigError::InsecureBind(_))));
         c.trust_proxy = true;
         assert!(c.check().is_ok());
@@ -190,7 +216,8 @@ mod tests {
 
     #[test]
     fn environment_overrides_the_file() {
-        let mut c: Config = toml::from_str("registration = \"open\"\nbind = \"127.0.0.1:9000\"").unwrap();
+        let mut c: Config =
+            toml::from_str("registration = \"open\"\nbind = \"127.0.0.1:9000\"").unwrap();
         c.apply_env(|n| match n {
             "AGORA_REGISTRATION" => Some("invite_only".into()),
             "AGORA_BIND" => Some("127.0.0.1:9100".into()),

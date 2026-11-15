@@ -60,13 +60,19 @@ impl Hub {
         let (tx, rx) = mpsc::channel(QUEUE);
         let came_online = list.is_empty();
         list.push(Conn { id, session_id, tx });
-        Some(Registered { id, rx, came_online })
+        Some(Registered {
+            id,
+            rx,
+            came_online,
+        })
     }
 
     /// Remove a connection. Returns true when it was the user's last one.
     pub fn unregister(&self, user: UserId, id: u64) -> bool {
         let mut conns = self.conns.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(list) = conns.get_mut(&user) else { return false };
+        let Some(list) = conns.get_mut(&user) else {
+            return false;
+        };
         list.retain(|c| c.id != id);
         if list.is_empty() {
             conns.remove(&user);
@@ -82,7 +88,9 @@ impl Hub {
 
     /// Queue `event` to every connection of each user in `to`.
     pub fn send(&self, to: &[UserId], event: &ServerEvent) {
-        let Ok(json) = serde_json::to_string(event) else { return };
+        let Ok(json) = serde_json::to_string(event) else {
+            return;
+        };
         let json: Arc<str> = json.into();
         let conns = self.conns.lock().unwrap_or_else(PoisonError::into_inner);
         for user in to {
@@ -99,7 +107,11 @@ impl Hub {
     /// Close every connection opened with a session (on logout).
     pub fn close_session(&self, session_id: i64) {
         let conns = self.conns.lock().unwrap_or_else(PoisonError::into_inner);
-        for c in conns.values().flatten().filter(|c| c.session_id == session_id) {
+        for c in conns
+            .values()
+            .flatten()
+            .filter(|c| c.session_id == session_id)
+        {
             let _ = c.tx.try_send(Outgoing::Close);
         }
     }

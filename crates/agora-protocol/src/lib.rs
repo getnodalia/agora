@@ -312,7 +312,9 @@ pub struct SearchResults {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientFrame {
     /// Must be the first frame, within [`WS_AUTH_TIMEOUT_SECS`].
-    Auth { token: String },
+    Auth {
+        token: String,
+    },
     /// The person is typing in a channel (or a thread of it). Send at most every few seconds.
     Typing {
         channel_id: ChannelId,
@@ -327,11 +329,20 @@ pub enum ClientFrame {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerEvent {
     /// Authentication succeeded; events follow.
-    Ready { user: User },
+    Ready {
+        user: User,
+    },
     /// A fatal error; the server closes the socket after it.
-    Error { code: ErrorCode, message: String },
-    MessageCreated { message: Message },
-    MessageUpdated { message: Message },
+    Error {
+        code: ErrorCode,
+        message: String,
+    },
+    MessageCreated {
+        message: Message,
+    },
+    MessageUpdated {
+        message: Message,
+    },
     MessageDeleted {
         channel_id: ChannelId,
         message_id: MessageId,
@@ -343,19 +354,34 @@ pub enum ServerEvent {
         reactions: Vec<Reaction>,
     },
     /// A channel was created, renamed, archived or gained members: refetch it.
-    ChannelChanged { workspace_id: WorkspaceId, channel_id: ChannelId },
+    ChannelChanged {
+        workspace_id: WorkspaceId,
+        channel_id: ChannelId,
+    },
     /// The caller can no longer see this channel.
-    ChannelRemoved { workspace_id: WorkspaceId, channel_id: ChannelId },
+    ChannelRemoved {
+        workspace_id: WorkspaceId,
+        channel_id: ChannelId,
+    },
     /// Someone joined a workspace the caller belongs to.
-    MemberJoined { workspace_id: WorkspaceId, member: Member },
+    MemberJoined {
+        workspace_id: WorkspaceId,
+        member: Member,
+    },
     /// The caller's read marker moved (from another of their devices).
-    ReadMarker { channel_id: ChannelId, message_id: MessageId },
+    ReadMarker {
+        channel_id: ChannelId,
+        message_id: MessageId,
+    },
     Typing {
         channel_id: ChannelId,
         thread_root_id: Option<MessageId>,
         user: User,
     },
-    Presence { user_id: UserId, online: bool },
+    Presence {
+        user_id: UserId,
+        online: bool,
+    },
     Pong,
 }
 
@@ -366,14 +392,27 @@ mod tests {
     #[test]
     fn frames_are_tagged_json() {
         let f = ClientFrame::Auth { token: "t".into() };
-        assert_eq!(serde_json::to_string(&f).unwrap(), r#"{"type":"auth","token":"t"}"#);
-        let typing: ClientFrame = serde_json::from_str(r#"{"type":"typing","channel_id":3}"#).unwrap();
-        assert_eq!(typing, ClientFrame::Typing { channel_id: ChannelId(3), thread_root_id: None });
+        assert_eq!(
+            serde_json::to_string(&f).unwrap(),
+            r#"{"type":"auth","token":"t"}"#
+        );
+        let typing: ClientFrame =
+            serde_json::from_str(r#"{"type":"typing","channel_id":3}"#).unwrap();
+        assert_eq!(
+            typing,
+            ClientFrame::Typing {
+                channel_id: ChannelId(3),
+                thread_root_id: None
+            }
+        );
     }
 
     #[test]
     fn events_round_trip() {
-        let e = ServerEvent::Presence { user_id: UserId(7), online: true };
+        let e = ServerEvent::Presence {
+            user_id: UserId(7),
+            online: true,
+        };
         let json = serde_json::to_string(&e).unwrap();
         assert_eq!(json, r#"{"type":"presence","user_id":7,"online":true}"#);
         assert_eq!(serde_json::from_str::<ServerEvent>(&json).unwrap(), e);
@@ -381,7 +420,14 @@ mod tests {
 
     #[test]
     fn errors_have_stable_codes() {
-        let e = ApiError { code: ErrorCode::RateLimited, message: "slow down".into(), field: None };
-        assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"code":"rate_limited","message":"slow down"}"#);
+        let e = ApiError {
+            code: ErrorCode::RateLimited,
+            message: "slow down".into(),
+            field: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"code":"rate_limited","message":"slow down"}"#
+        );
     }
 }

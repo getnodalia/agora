@@ -19,7 +19,14 @@ pub struct Server {
 
 impl Server {
     pub async fn start(database: &str) -> Server {
-        Self::start_with(Config { database: database.into(), ..Config::default() }, 0).await
+        Self::start_with(
+            Config {
+                database: database.into(),
+                ..Config::default()
+            },
+            0,
+        )
+        .await
     }
 
     pub async fn start_with(mut config: Config, port: u16) -> Server {
@@ -28,7 +35,9 @@ impl Server {
         config.limits.auth_per_minute = 1_000;
         config.limits.writes_per_minute = 10_000;
         let (router, state) = agora_server::build(config).await.unwrap();
-        let listener = tokio::net::TcpListener::bind(state.config.bind).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(state.config.bind)
+            .await
+            .unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let (stop, stopped) = oneshot::channel::<()>();
         let serve_state = state.clone();
@@ -39,7 +48,12 @@ impl Server {
             .await
             .unwrap();
         });
-        Server { url, stop: Some(stop), task, state }
+        Server {
+            url,
+            stop: Some(stop),
+            task,
+            state,
+        }
     }
 
     pub fn port(&self) -> u16 {
@@ -56,7 +70,10 @@ impl Server {
             let _ = stop.send(());
         }
         // Graceful shutdown waits for open sockets; they close once the hub tells them to.
-        if tokio::time::timeout(std::time::Duration::from_secs(5), &mut self.task).await.is_err() {
+        if tokio::time::timeout(std::time::Duration::from_secs(5), &mut self.task)
+            .await
+            .is_err()
+        {
             self.task.abort();
         }
         self.state.store.close().await;
@@ -64,7 +81,11 @@ impl Server {
 }
 
 pub fn temp_db(name: &str) -> (std::path::PathBuf, String) {
-    let dir = std::env::temp_dir().join(format!("agora-it-{name}-{}-{}", std::process::id(), agora_client::new_nonce()));
+    let dir = std::env::temp_dir().join(format!(
+        "agora-it-{name}-{}-{}",
+        std::process::id(),
+        agora_client::new_nonce()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let url = format!("sqlite://{}", dir.join("agora.db").display());
     (dir, url)
@@ -74,7 +95,11 @@ pub async fn register(server: &Server, username: &str) -> (Client, User) {
     register_with_invite(server, username, None).await
 }
 
-pub async fn register_with_invite(server: &Server, username: &str, invite: Option<&str>) -> (Client, User) {
+pub async fn register_with_invite(
+    server: &Server,
+    username: &str,
+    invite: Option<&str>,
+) -> (Client, User) {
     let (client, session) = server
         .anonymous()
         .register(&RegisterRequest {
@@ -134,7 +159,11 @@ impl Live {
     }
 
     /// Assert that no event matching `pick` arrives within `wait`.
-    pub async fn assert_none(&mut self, wait: Duration, mut pick: impl FnMut(&ServerEvent) -> bool) {
+    pub async fn assert_none(
+        &mut self,
+        wait: Duration,
+        mut pick: impl FnMut(&ServerEvent) -> bool,
+    ) {
         let deadline = tokio::time::Instant::now() + wait;
         while let Ok(Some(event)) = tokio::time::timeout_at(deadline, self.rx.recv()).await {
             if let RealtimeEvent::Event(ev) = &event {
@@ -145,5 +174,9 @@ impl Live {
 }
 
 pub fn invite_only() -> Config {
-    Config { registration: RegistrationPolicy::InviteOnly, database: "sqlite::memory:".into(), ..Config::default() }
+    Config {
+        registration: RegistrationPolicy::InviteOnly,
+        database: "sqlite::memory:".into(),
+        ..Config::default()
+    }
 }
