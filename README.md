@@ -1,19 +1,73 @@
-# Ágora
+<div align="center">
+  <a href="https://getnodalia.com">
+    <img src="https://raw.githubusercontent.com/danielmigueltejedor/nodalia-web/main/assets/brand/nodalia-wordmark-badge.svg" width="150" alt="Nodalia">
+  </a>
+  <br><br>
+  <img src="assets/icons/hicolor/512x512/apps/dev.danielmiguelt.Agora.png" width="192" alt="Ágora">
+  <h1>Ágora</h1>
+  <p><strong>The self-hosted, end-to-end encrypted team chat of the Nodalia suite.</strong></p>
 
-Ágora is open-source team chat you run yourself: workspaces, public and private channels, direct
-messages, threads, reactions, mentions, unread markers and search, on your own server. The server
-is one Rust binary with a SQLite file. The desktop client is native (egui, no web view) and drawn
-in the [Nodalia Design Language](https://github.com/getnodalia/nodalia-design).
+  <p>
+    <a href="https://github.com/getnodalia/agora/releases/latest"><img src="https://img.shields.io/github/v/release/getnodalia/agora?label=version&color=0F7C80&include_prereleases" alt="Latest version"></a>
+    <img src="https://img.shields.io/badge/status-early-orange" alt="Early">
+    <img src="https://img.shields.io/badge/Rust-native-dea584?logo=rust&logoColor=black" alt="Native Rust">
+    <img src="https://img.shields.io/badge/encryption-MLS%20(RFC%209420)-0F7C80" alt="End-to-end encrypted with MLS">
+    <img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-2ea44f" alt="MIT OR Apache-2.0">
+  </p>
 
-> **Status: early, first release (0.1.0).** Everything listed under "What works" is implemented
-> and tested against a real server, and the protocol may still change before 1.0. Messages are **end-to-end encrypted** with MLS (RFC 9420): the
-> server stores only ciphertext. It still sees who talks to whom and when; read
-> [docs/security.md](docs/security.md) for what it protects and what it does not. Use TLS for
-> any server outside your own computer.
+  <p>
+    <a href="https://getnodalia.com/agora">Website</a> ·
+    <a href="#screenshots">Screenshots</a> ·
+    <a href="#features">Features</a> ·
+    <a href="#download">Download</a> ·
+    <a href="#build-it">Build</a> ·
+    <a href="#security">Security</a> ·
+    <a href="#license-and-credits">License</a>
+  </p>
+</div>
 
-![Two Ágora clients side by side: a message, a reaction and a thread arrive in real time](docs/screenshots/two-clients.png)
+<p align="center">
+  <img src="docs/screenshots/two-clients.png" width="100%" alt="Two Ágora clients side by side in the dark theme: a message, a reaction and a thread arrive in real time">
+  <br><sub>Two people in <code>#general</code>: a message, a reaction and a thread arrive in the other window at once.</sub>
+</p>
 
-## What works
+---
+
+## Overview
+
+**Ágora** is the team chat of [Nodalia](https://getnodalia.com): workspaces, public and private
+channels, direct messages, threads, reactions, mentions, unread markers and search, on a server
+you run yourself. The server is one Rust binary with a SQLite file and needs no outside service.
+The desktop app is native (egui, no Electron, no Chromium, no web view) for Linux, macOS and
+Windows, and wears Nodalia Design: rounded islands on the window colour, a hamburger menu, and
+the suite's own window controls on Linux (macOS and Windows keep their native ones).
+
+Every channel and direct message is **end-to-end encrypted** with MLS (RFC 9420): the server
+stores only ciphertext.
+
+> [!IMPORTANT]
+> **Ágora is at an early stage (0.1).** Everything under [Features](#features) is implemented and
+> tested against a real server, but the protocol may still change before 1.0. The server still
+> sees who talks to whom and when; [docs/security.md](docs/security.md) says what the encryption
+> protects and what it does not. Use TLS for any server outside your own computer.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/light.png" alt="Ágora in its light theme, with a channel, its details and its people"></td>
+    <td width="50%"><img src="docs/screenshots/encrypted.png" alt="Two clients in an end-to-end encrypted channel; the details panel lists the devices that can read it with their fingerprints"></td>
+  </tr>
+  <tr>
+    <td><sub><b>Light theme</b>: the same islands in light; the theme is chosen in Preferences.</sub></td>
+    <td><sub><b>End-to-end encryption</b>: the details panel lists the devices that can read a conversation, with fingerprints to compare in person.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/new-device.png" alt="A laptop signed in later: what was said before it joined stays encrypted, what follows it reads"><br><sub><b>A new device</b>: what was said before it joined stays encrypted, what follows it reads.</sub></td>
+  </tr>
+</table>
+
+## Features
 
 - **Accounts**: registration (open, by invitation or closed), sign-in, sign-out, sessions that
   expire, "keep me signed in" on the desktop.
@@ -36,18 +90,13 @@ in the [Nodalia Design Language](https://github.com/getnodalia/nodalia-design).
   panel), light, dark and high-contrast themes, reduced motion, keyboard shortcuts, Spanish and
   English, NDL window controls on Linux and native ones on macOS and Windows.
 
-![The light theme](docs/screenshots/light.png)
-
-![Two clients in an end-to-end encrypted channel; the details panel lists the devices that can read it with their fingerprints](docs/screenshots/encrypted.png)
-
-![A laptop signed in later: what was said before it joined stays encrypted, what follows it reads](docs/screenshots/new-device.png)
-
 Not yet: file uploads, voice and video, notifications from the operating system, a web client,
 mobile apps, PostgreSQL, federation, verified device identities. See [ROADMAP.md](ROADMAP.md).
 
 ## Download
 
-Every release on the [releases page](https://github.com/getnodalia/agora/releases/latest) has:
+Every release is on the [releases page](https://github.com/getnodalia/agora/releases/latest) and
+on [getnodalia.com/agora](https://getnodalia.com/agora):
 
 | System | Files |
 |---|---|
@@ -126,7 +175,30 @@ The server refuses to listen on a public address without TLS in front of it unle
 [docs/security.md](docs/security.md) has the whole model and its limits, and
 [SECURITY.md](SECURITY.md) how to report a vulnerability.
 
-## Licence
+## Contributing
 
-`MIT OR Apache-2.0`, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
-Assets and their sources are in [ATTRIBUTION.md](ATTRIBUTION.md).
+Issues and pull requests are welcome. New contributors and AI agents start with
+[`AGENTS.md`](AGENTS.md), then [`docs/`](docs/); what is planned is in [ROADMAP.md](ROADMAP.md),
+and what is still moving to Nodalia Design is in [`NODALIA_MIGRATION.md`](NODALIA_MIGRATION.md).
+`main` changes only through pull requests, which pass formatting, Clippy and the whole test suite.
+
+## App icon
+
+Socrates, who did his philosophy in conversation with whoever he met in the agora of Athens. The
+portrait comes from a photograph of the marble bust in the Louvre, cut out in black and white on
+Ágora's teal like every Nodalia app icon. Sources, sizes and licence are in
+[ATTRIBUTION.md](ATTRIBUTION.md).
+
+## The Nodalia suite
+
+Ágora is one of the applications of [Nodalia](https://getnodalia.com)
+([GitHub](https://github.com/getnodalia)), an independent software project developed in public
+by [Daniel Miguel Tejedor](https://danielmigueltejedor.com). It shares the Nodalia Design
+Language from [nodalia-design](https://github.com/getnodalia/nodalia-design) and Nodalia's
+engineering rules from [getnodalia/foundation](https://github.com/getnodalia/foundation).
+
+## License and credits
+
+Ágora is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Every asset keeps its own open licence and is listed with its author, source and licence in
+[ATTRIBUTION.md](ATTRIBUTION.md).
