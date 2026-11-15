@@ -82,10 +82,13 @@ theme choice lives only in Preferences. What is still missing is in `NODALIA_MIG
 
 ## Release
 
-Nothing is released yet. Releases will follow Foundation's automatic flow: a pull request that
-bumps `[workspace.package] version` and adds `docs/release-notes/vX.Y.Z.md`, merged, is tagged
-and published by workflows. Nobody pushes tags. Until that flow is set up and validated here, do
-not publish anything.
+Merging a version bump with its notes releases it: a pull request that sets
+`[workspace.package] version` to a release version and adds `docs/release-notes/vX.Y.Z.md`
+(format in that folder's README, checked by `scripts/check-release-notes.sh`).
+`release-auto.yml` tags the merge through Foundation's `release-tag`, builds and starts the
+packages with `release-linux.yml`, `release-macos.yml` (DMG with its own window, signed ad hoc) and
+`release-windows.yml`, and publishes the release through Foundation's `release-publish`. Nobody
+pushes a tag by hand. `main` carries a `-dev` version between releases.
 
 ## Pull requests
 

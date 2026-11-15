@@ -3,6 +3,8 @@
 //! `AGORA_DESKTOP_DIR` stores settings and the session somewhere else than the platform's
 //! config folder, which is how two clients run side by side on one computer.
 
+// A window app on Windows: no console opens beside it.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,

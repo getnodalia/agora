@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "agora-client"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "agora-core",
  "agora-e2e",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "agora-core"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "agora-desktop"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "agora-client",
  "agora-core",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "agora-e2e"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "agora-core",
  "base64 0.22.1",
@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "agora-protocol"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "agora-core",
  "serde",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "agora-server"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "agora-client",
  "agora-core",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "agora-storage"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "agora-core",
  "agora-protocol",
