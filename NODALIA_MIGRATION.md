@@ -27,8 +27,6 @@ None: Ágora has no upstream.
 
 ## NDL work pending
 
-- `nodalia-theme` is pinned to the commit of nodalia-design's Ágora accent pull request until it
-  merges; then move the pin to `main`.
 - `creator::search_field` draws its text at the top of a tall field; Ágora draws its own centred
   copy (`widgets::search_field`) until nodalia-design centres it.
 - An emoji picker and a chat message list are drawn in Ágora; if another app needs them, they move

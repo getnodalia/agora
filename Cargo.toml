@@ -45,7 +45,7 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 url = "2"
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "system_fonts", "wayland", "x11"] }
 egui = "0.37"
-nodalia-theme = { git = "https://github.com/getnodalia/nodalia-design", rev = "4c5cb77596d73031a747c1209845a3f392ee51e7", features = ["egui", "creator"] }
+nodalia-theme = { git = "https://github.com/getnodalia/nodalia-design", rev = "325537c3261591aa69310e4e0276b93291158cd0", features = ["egui", "creator"] }
 directories = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 png = "0.17"
