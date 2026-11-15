@@ -5,6 +5,7 @@ members = [
     "crates/agora-protocol",
     "crates/agora-storage",
     "crates/agora-client",
+    "crates/agora-e2e",
     "apps/agora-server",
     "apps/agora-desktop",
 ]
@@ -12,7 +13,7 @@ members = [
 [workspace.package]
 version = "0.1.0-dev"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/getnodalia/agora"
 authors = ["Nodalia"]
@@ -22,6 +23,7 @@ agora-core = { path = "crates/agora-core" }
 agora-protocol = { path = "crates/agora-protocol" }
 agora-storage = { path = "crates/agora-storage" }
 agora-client = { path = "crates/agora-client" }
+agora-e2e = { path = "crates/agora-e2e" }
 agora-server = { path = "apps/agora-server" }
 
 serde = { version = "1", features = ["derive"] }
@@ -49,6 +51,10 @@ nodalia-theme = { git = "https://github.com/getnodalia/nodalia-design", rev = "3
 directories = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 png = "0.17"
+openmls = "0.9.2"
+openmls_basic_credential = "0.6.0"
+openmls_rust_crypto = "0.6.0"
+openmls_traits = "0.6.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

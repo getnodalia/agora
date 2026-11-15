@@ -5,6 +5,7 @@
 //! desktop app, tests and future web or mobile clients share them.
 
 pub mod realtime;
+pub mod secure;
 
 use agora_core::{ChannelId, MessageId, UserId, WorkspaceId};
 use agora_protocol::*;
@@ -14,6 +15,7 @@ use serde::Serialize;
 use url::Url;
 
 pub use realtime::{connect, Realtime, RealtimeEvent};
+pub use secure::Secure;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -27,6 +29,9 @@ pub enum ClientError {
     InvalidUrl(String),
     #[error("unexpected answer from the server: {0}")]
     Decode(String),
+    /// End-to-end encryption failed on this device (keys, storage, a damaged message).
+    #[error("encryption failed: {0}")]
+    Encryption(String),
 }
 
 impl ClientError {
@@ -357,16 +362,92 @@ impl Client {
         self.post(&format!("/channels/{id}/messages"), req).await
     }
 
-    pub async fn edit_message(&self, id: MessageId, body: &str) -> Result<Message> {
-        let req = EditMessageRequest {
-            body: body.to_owned(),
-        };
+    /// Replace a message's text. Messages are encrypted: [`Secure::edit`] builds the request.
+    pub async fn edit_message(&self, id: MessageId, req: &EditMessageRequest) -> Result<Message> {
         self.send(
             Method::PATCH,
             self.url(&format!("/messages/{id}"))?,
-            Some(&req),
+            Some(req),
         )
         .await
+    }
+
+    /// Messages by id that the caller may read in a workspace, newest first.
+    pub async fn lookup_messages(
+        &self,
+        ws: WorkspaceId,
+        ids: &[MessageId],
+    ) -> Result<SearchResults> {
+        self.post(
+            &format!("/workspaces/{ws}/messages/lookup"),
+            &LookupMessagesRequest { ids: ids.to_vec() },
+        )
+        .await
+    }
+
+    // End-to-end encryption -------------------------------------------------------------------
+
+    /// Tie this session to a device's MLS signing key (base64).
+    pub async fn register_device(&self, public_key: &str) -> Result<DeviceStatus> {
+        self.send(
+            Method::PUT,
+            self.url("/devices/me")?,
+            Some(&RegisterDeviceRequest {
+                public_key: public_key.to_owned(),
+            }),
+        )
+        .await
+    }
+
+    /// Publish key packages for this session's device (base64).
+    pub async fn publish_key_packages(&self, key_packages: Vec<String>) -> Result<DeviceStatus> {
+        self.post(
+            "/devices/me/key_packages",
+            &PublishKeyPackagesRequest { key_packages },
+        )
+        .await
+    }
+
+    /// Take a key package for each listed device (base64 signing keys) to add it to a
+    /// conversation. Devices without one left are missing from the answer.
+    pub async fn claim_key_packages(
+        &self,
+        id: ChannelId,
+        devices: Vec<String>,
+    ) -> Result<Vec<ClaimedKeyPackage>> {
+        self.post(
+            &format!("/channels/{id}/mls/key_packages"),
+            &ClaimKeyPackagesRequest { devices },
+        )
+        .await
+    }
+
+    /// A conversation's encryption state, with the log entries after `after` when it is set.
+    pub async fn mls_state(&self, id: ChannelId, after: Option<i64>) -> Result<MlsState> {
+        let mut url = self.url(&format!("/channels/{id}/mls"))?;
+        if let Some(after) = after {
+            url.query_pairs_mut()
+                .append_pair("after", &after.to_string());
+        }
+        self.send::<(), _>(Method::GET, url, None).await
+    }
+
+    pub async fn mls_create_group(
+        &self,
+        id: ChannelId,
+        group_info: &str,
+    ) -> Result<CommitResponse> {
+        self.post(
+            &format!("/channels/{id}/mls/group"),
+            &CreateGroupRequest {
+                group_info: group_info.to_owned(),
+            },
+        )
+        .await
+    }
+
+    pub async fn mls_commit(&self, id: ChannelId, req: &CommitRequest) -> Result<CommitResponse> {
+        self.post(&format!("/channels/{id}/mls/commit"), req).await
     }
 
     pub async fn delete_message(&self, id: MessageId) -> Result<()> {

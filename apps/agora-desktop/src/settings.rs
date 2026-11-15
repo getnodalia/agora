@@ -111,6 +111,16 @@ pub fn forget_session(dir: Option<&Path>) {
     }
 }
 
+/// Where this computer keeps its encryption device for `user` on `server`. The file holds the
+/// device's private keys and the text it has decrypted, so it is written like the session file.
+pub fn device_path(dir: Option<&Path>, server: &str, user: agora_core::UserId) -> Option<PathBuf> {
+    let host: String = server
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    Some(dir?.join(format!("device-{host}-{}.json", user.0)))
+}
+
 /// Write through a temporary file and rename, so a crash never leaves half a file, with the
 /// permissions set before any byte is written.
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {

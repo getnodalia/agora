@@ -1,7 +1,8 @@
-use agora_core::{format, limits, roles, validate, ChannelId, MessageId, UserId, WorkspaceId};
+use agora_core::{limits, roles, validate, ChannelId, MessageId, UserId, WorkspaceId};
+use agora_e2e::Kind;
 use agora_protocol::{
-    EditMessageRequest, Message, MessagePage, PostMessageRequest, ReactRequest, SearchResults,
-    ServerEvent, Thread,
+    EditMessageRequest, LookupMessagesRequest, Message, MessagePage, PostMessageRequest,
+    ReactRequest, SearchResults, ServerEvent, Thread,
 };
 use agora_storage::messages::{Inserted, NewMessage};
 use agora_storage::ChannelRow;
@@ -53,19 +54,47 @@ pub async fn history(
     Ok(Json(MessagePage { messages, has_more }))
 }
 
-/// Mentioned usernames that exist and can read the channel.
-async fn mentioned(
-    state: &AppState,
+/// Largest encrypted message: the longest body, in the widest UTF-8, plus MLS framing.
+const CIPHERTEXT_MAX: usize = limits::MESSAGE_MAX_CHARS * 4 + 4_096;
+/// People one message can mention.
+const MENTIONS_MAX: usize = 50;
+
+/// The people a message mentions who can read the channel. The client names them, since the
+/// server cannot read the text.
+fn mentioned(listed: &[UserId], audience: &[UserId]) -> AppResult<Vec<UserId>> {
+    if listed.len() > MENTIONS_MAX {
+        return Err(AppError::invalid("too many mentions"));
+    }
+    let mut ids: Vec<UserId> = listed
+        .iter()
+        .copied()
+        .filter(|id| audience.contains(id))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+/// The encrypted text of a new or edited message: the MLS application message and its epoch.
+fn ciphertext(
     channel: &ChannelRow,
     body: &str,
-    audience: &[UserId],
-) -> AppResult<Vec<UserId>> {
-    let names = format::mentions(body);
-    let ids = state
-        .store
-        .resolve_usernames(channel.workspace_id, &names)
-        .await?;
-    Ok(ids.into_iter().filter(|id| audience.contains(id)).collect())
+    ciphertext: Option<&str>,
+) -> AppResult<(Vec<u8>, u64)> {
+    if !body.is_empty() {
+        return Err(AppError::invalid(
+            "messages are end-to-end encrypted: send the text as ciphertext, never as body",
+        ));
+    }
+    let Some(ciphertext) = ciphertext else {
+        return Err(AppError::invalid("ciphertext is required"));
+    };
+    if ciphertext.len() > CIPHERTEXT_MAX {
+        return Err(AppError::invalid("the message is too long"));
+    }
+    let data = super::e2e::decode("ciphertext", ciphertext)?;
+    let epoch = super::e2e::check_mls(channel.id, &data, Kind::Application)?;
+    Ok((data, epoch))
 }
 
 pub async fn post(
@@ -83,7 +112,7 @@ pub async fn post(
         }));
     }
     check_write(&state, auth.user.id)?;
-    let body = validate::message_body(&req.body)?;
+    let (data, epoch) = ciphertext(&access.channel, &req.body, req.ciphertext.as_deref())?;
     let nonce = validate::nonce(&req.client_nonce)?;
     if let Some(root) = req.thread_root_id {
         let (root_channel, _, root_parent, root_deleted) = state
@@ -108,16 +137,17 @@ pub async fn post(
             .await?;
     }
     let audience = state.store.channel_audience(&access.channel).await?;
-    let mentions = mentioned(&state, &access.channel, &body, &audience).await?;
+    let mentions = mentioned(&req.mentions, &audience)?;
     let inserted = state
         .store
         .insert_message(NewMessage {
             channel: access.channel.id,
             author: auth.user.id,
             thread_root: req.thread_root_id,
-            body: &body,
+            body: "",
             nonce: &nonce,
             mentioned: &mentions,
+            ciphertext: Some((&data, epoch)),
             now: now_ms(),
         })
         .await?;
@@ -195,12 +225,19 @@ pub async fn edit(
         return Err(AppError::forbidden("you can only edit your own messages"));
     }
     check_write(&state, auth.user.id)?;
-    let body = validate::message_body(&req.body)?;
+    let (data, epoch) = ciphertext(&access.channel, &req.body, req.ciphertext.as_deref())?;
     let audience = state.store.channel_audience(&access.channel).await?;
-    let mentions = mentioned(&state, &access.channel, &body, &audience).await?;
+    let mentions = mentioned(&req.mentions, &audience)?;
     state
         .store
-        .edit_message(id, &body, &mentions, now_ms())
+        .edit_message(
+            id,
+            "",
+            Some((&data, epoch)),
+            auth.user.id,
+            &mentions,
+            now_ms(),
+        )
         .await?;
     let message = state
         .store
@@ -315,6 +352,25 @@ pub async fn search(
             &query,
             50,
         )
+        .await?;
+    Ok(Json(SearchResults { messages }))
+}
+
+/// `POST /workspaces/{id}/messages/lookup`: messages by id, for a client's own search results.
+pub async fn lookup(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+    Json(req): Json<LookupMessagesRequest>,
+) -> AppResult<Json<SearchResults>> {
+    let ws = WorkspaceId(id);
+    let role = workspace_role(&state, ws, auth.user.id).await?;
+    if req.ids.len() > 100 {
+        return Err(AppError::invalid("ask for at most 100 messages"));
+    }
+    let messages = state
+        .store
+        .lookup_messages(ws, auth.user.id, role == agora_core::Role::Guest, &req.ids)
         .await?;
     Ok(Json(SearchResults { messages }))
 }

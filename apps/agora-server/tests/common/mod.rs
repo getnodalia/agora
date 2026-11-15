@@ -4,8 +4,9 @@
 
 use std::time::Duration;
 
-use agora_client::{connect, parse_server_url, Client, Realtime, RealtimeEvent};
-use agora_protocol::{RegisterRequest, ServerEvent, User};
+use agora_client::{connect, new_nonce, parse_server_url, Client, Realtime, RealtimeEvent, Secure};
+use agora_core::{ChannelId, MessageId};
+use agora_protocol::{Message, MessagePage, RegisterRequest, ServerEvent, Thread, User};
 use agora_server::config::{Config, RegistrationPolicy};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -93,6 +94,94 @@ pub fn temp_db(name: &str) -> (std::path::PathBuf, String) {
 
 pub async fn register(server: &Server, username: &str) -> (Client, User) {
     register_with_invite(server, username, None).await
+}
+
+/// A signed-in person with one encrypting device: the client, plus what the desktop app does
+/// around it (encrypt before sending, decrypt what arrives).
+#[derive(Clone)]
+pub struct Person {
+    pub client: Client,
+    pub user: User,
+    pub e2e: Secure,
+}
+
+impl std::ops::Deref for Person {
+    type Target = Client;
+    fn deref(&self) -> &Client {
+        &self.client
+    }
+}
+
+impl Person {
+    pub async fn new(client: Client, user: User) -> Person {
+        let e2e = Secure::open(&client, user.id, None).await.unwrap();
+        Person { client, user, e2e }
+    }
+
+    pub async fn register(server: &Server, username: &str) -> Person {
+        let (client, user) = register(server, username).await;
+        Person::new(client, user).await
+    }
+
+    /// Sign in again from another device.
+    pub async fn another_device(&self, server: &Server) -> Person {
+        let (client, session) = server
+            .anonymous()
+            .login(
+                &self.user.username,
+                &format!("{}-test-password", self.user.username),
+            )
+            .await
+            .unwrap();
+        Person::new(client, session.user).await
+    }
+
+    pub async fn try_say(&self, channel: ChannelId, body: &str) -> agora_client::Result<Message> {
+        self.e2e
+            .post(channel, body, &new_nonce(), None, Vec::new())
+            .await
+    }
+
+    pub async fn say(&self, channel: ChannelId, body: &str) -> Message {
+        self.try_say(channel, body).await.unwrap()
+    }
+
+    pub async fn reply(&self, channel: ChannelId, root: MessageId, body: &str) -> Message {
+        self.e2e
+            .post(channel, body, &new_nonce(), Some(root), Vec::new())
+            .await
+            .unwrap()
+    }
+
+    pub async fn edit(&self, message: &Message, body: &str) -> agora_client::Result<Message> {
+        self.e2e.edit(message, body, Vec::new()).await
+    }
+
+    /// What this device makes of a message that arrived: catch up, then decrypt.
+    pub async fn read(&self, mut message: Message) -> Message {
+        self.e2e.sync(message.channel_id).await.unwrap();
+        self.e2e.fill_one(&mut message).await;
+        message
+    }
+
+    pub async fn history(&self, channel: ChannelId) -> MessagePage {
+        let mut page = self
+            .client
+            .history(channel, None, None, None)
+            .await
+            .unwrap();
+        self.e2e.sync(channel).await.unwrap();
+        self.e2e.fill(&mut page.messages).await;
+        page
+    }
+
+    pub async fn thread(&self, root: MessageId) -> Thread {
+        let mut thread = self.client.thread(root).await.unwrap();
+        self.e2e.sync(thread.root.channel_id).await.unwrap();
+        self.e2e.fill_one(&mut thread.root).await;
+        self.e2e.fill(&mut thread.replies).await;
+        thread
+    }
 }
 
 pub async fn register_with_invite(

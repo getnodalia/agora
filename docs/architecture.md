@@ -9,6 +9,8 @@ agora-core        ids, roles and permissions, limits, validation, the message te
 agora-protocol    the wire contract: JSON types for HTTP and the WebSocket (API v1)
    ↑            ↑
 agora-storage   agora-client    SQLite storage (SQLx, migrations) · HTTP + WebSocket client
+                ↑   ↑
+                agora-e2e       MLS (OpenMLS): a device, its groups, the text it decrypted
    ↑            ↑
 agora-server    agora-desktop   Tokio + Axum server · egui + nodalia-theme desktop app
 ```
@@ -34,6 +36,18 @@ agora-server    agora-desktop   Tokio + Axum server · egui + nodalia-theme desk
 WebSocket on the current Tokio runtime: it authenticates, sends heartbeats, reconnects with
 exponential backoff and jitter, and stops only when the server rejects the session.
 
+## End-to-end encryption (`crates/agora-e2e`, `agora_client::Secure`)
+
+`agora-e2e` holds one device: its MLS signature key, a group per conversation, and the plaintext
+it decrypted (MLS forgets keys once used). It does no I/O. `Secure` in `agora-client` drives it
+against the server: before sending it catches the conversation up (Welcome or external commit to
+enter, then the log in order), removes devices that may no longer read it and adds those that
+may from claimed key packages, then encrypts. Every step that changes the group is a commit at
+the current epoch; if another device committed first the server answers `stale_epoch` and
+`Secure` catches up and tries again. The server (`routes/e2e.rs`, `agora-storage/src/mls.rs`)
+checks group ids and epochs from the MLS headers and keeps the log; it holds no key.
+[security.md](security.md) says what this protects and what it does not.
+
 ## Desktop app (`apps/agora-desktop`)
 
 - `net.rs` runs requests on a two-thread Tokio runtime; each finished request becomes a `Reply`
@@ -44,11 +58,12 @@ exponential backoff and jitter, and stops only when the server rejects the sessi
 - `view.rs`, `signin.rs`, `dialogs.rs` draw with egui and `nodalia_theme` (palette, creator-suite
   islands, buttons, fields, icons, window controls) and return `Action`s that `app.rs` carries
   out after the frame.
-- Settings and the optional saved session live in the config folder; the session file is
-  written owner-only.
+- Settings, the optional saved session and the device file (keys and decrypted text) live in the
+  config folder, written owner-only. Real-time events are decrypted in order before the window
+  sees them.
 
 ## Message text
 
-Messages are stored exactly as typed. Clients parse a small Markdown subset (`agora_core::format`):
+Messages are encrypted on the device; the text is what the person typed. Clients parse a small Markdown subset (`agora_core::format`):
 `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, fenced code blocks, `> quotes`, `@mentions` and
 `http`/`https`/`mailto` links. There is no HTML anywhere, so there is nothing to sanitise.

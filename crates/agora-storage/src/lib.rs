@@ -12,6 +12,7 @@
 
 mod channels;
 pub mod messages;
+pub mod mls;
 mod rows;
 pub mod users;
 pub mod workspaces;
@@ -33,6 +34,8 @@ pub enum StoreError {
     NotFound,
     #[error("invitation is expired or used up")]
     InviteExhausted,
+    #[error("the conversation's encryption epoch moved on")]
+    StaleEpoch,
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("migration error: {0}")]

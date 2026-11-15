@@ -924,6 +924,17 @@ fn message_item(
                         .italics()
                         .color(color(p.text_tertiary)),
                 );
+            } else if unreadable(message) {
+                ui.horizontal_wrapped(|ui| {
+                    icon(ui, "lock", 14.0, color(p.text_tertiary));
+                    ui.label(
+                        RichText::new(tr(
+                            "Encrypted before this device could read this conversation.",
+                        ))
+                        .italics()
+                        .color(color(p.text_tertiary)),
+                    );
+                });
             } else {
                 widgets::message_body(ui, look, &message.body, &me.username);
                 if message.edited_at.is_some() {
@@ -980,6 +991,11 @@ fn message_item(
     }
 }
 
+/// An encrypted message this device holds no key for: sent before it joined the conversation.
+fn unreadable(message: &Message) -> bool {
+    message.encrypted && !message.deleted && message.body.is_empty()
+}
+
 fn toolbar(
     ui: &mut Ui,
     main: &Main,
@@ -990,7 +1006,8 @@ fn toolbar(
     actions: &mut Vec<Action>,
 ) {
     let p = &look.palette;
-    let mine = message.author.id == main.model.me.id;
+    // Text this device cannot read cannot be edited from it either.
+    let mine = message.author.id == main.model.me.id && !unreadable(message);
     let count =
         1 + usize::from(threads) + usize::from(mine) + usize::from(main.can_delete(message));
     let width = count as f32 * 30.0 + 8.0;
@@ -1513,6 +1530,9 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                             });
                         }
                     }
+                    if let Some(c) = &channel {
+                        encryption(ui, main, look, c.id);
+                    }
                     ui.add_space(12.0);
                     ui.label(
                         RichText::new(tr("People"))
@@ -1569,6 +1589,66 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                     }
                 });
         });
+}
+
+/// Which devices can read the open conversation, with the fingerprints people can compare.
+fn encryption(ui: &mut Ui, main: &Main, look: &Look, channel: ChannelId) {
+    let p = &look.palette;
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        icon(ui, "lock", 14.0, color(p.accent_text));
+        ui.label(
+            RichText::new(tr("Encrypted end to end"))
+                .size(font_size::CAPTION)
+                .strong()
+                .color(color(p.text_secondary)),
+        );
+    });
+    ui.label(
+        RichText::new(tr(
+            "Only these devices can read what is said here. The server cannot. Compare fingerprints in person to be sure.",
+        ))
+        .size(font_size::CAPTION)
+        .color(color(p.text_tertiary)),
+    );
+    ui.add_space(4.0);
+    let fingerprint = |ui: &mut Ui, name: &str, print: &str, this: bool| {
+        ui.horizontal_wrapped(|ui| {
+            let label = if this {
+                trf("{} (this device)", &[name])
+            } else {
+                name.to_string()
+            };
+            ui.label(RichText::new(label).color(color(p.text_primary)));
+            ui.label(
+                RichText::new(print)
+                    .monospace()
+                    .size(font_size::CAPTION)
+                    .color(color(p.text_tertiary)),
+            );
+        });
+    };
+    let mine = main.secure.fingerprint();
+    let devices = main.model.devices.get(&channel);
+    let names = main
+        .model
+        .workspace
+        .and_then(|ws| main.model.members.get(&ws));
+    match devices {
+        Some(list) if !list.is_empty() => {
+            for leaf in list {
+                let print = agora_e2e::fingerprint(&leaf.public_key);
+                let name = names
+                    .and_then(|l| l.iter().find(|m| m.user.id == leaf.user))
+                    .map_or_else(
+                        || tr("Someone").to_string(),
+                        |m| m.user.display_name.clone(),
+                    );
+                fingerprint(ui, &name, &print, print == mine);
+            }
+        }
+        _ => fingerprint(ui, &main.model.me.display_name, mine, true),
+    }
 }
 
 // --- Toasts and time -------------------------------------------------------------------------------

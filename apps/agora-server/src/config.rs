@@ -71,7 +71,7 @@ impl Default for Limits {
             writes_per_minute: 120,
             reads_per_minute: 1_200,
             connections_per_user: 16,
-            max_body_bytes: 64 * 1024,
+            max_body_bytes: 1024 * 1024,
         }
     }
 }

@@ -54,6 +54,13 @@ impl AppError {
             "too many requests; try again shortly",
         )
     }
+    pub fn stale_epoch() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::StaleEpoch,
+            "the conversation's encryption moved on; catch up and encrypt again",
+        )
+    }
     pub fn internal() -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -76,6 +83,7 @@ impl From<StoreError> for AppError {
         match e {
             StoreError::Conflict => AppError::conflict("it already exists"),
             StoreError::NotFound => AppError::not_found(),
+            StoreError::StaleEpoch => AppError::stale_epoch(),
             StoreError::InviteExhausted => AppError::new(
                 StatusCode::GONE,
                 ErrorCode::NotFound,

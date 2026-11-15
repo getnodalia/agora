@@ -5,11 +5,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use agora_client::{Client, ClientError, Realtime, RealtimeEvent};
+use agora_client::{Client, ClientError, Realtime, RealtimeEvent, Secure};
 use agora_core::{ChannelId, MessageId, UserId, WorkspaceId};
 use agora_protocol::{
-    ClientFrame, CreateChannelRequest, CreateInviteRequest, Invite, Message, PostMessageRequest,
-    RegisterRequest, ServerEvent, ServerInfo,
+    ClientFrame, CreateChannelRequest, CreateInviteRequest, Invite, Message, RegisterRequest,
+    ServerEvent, ServerInfo, SessionResponse,
 };
 use nodalia_theme::creator::Look;
 use nodalia_theme::for_egui::{self, Appearance};
@@ -17,7 +17,7 @@ use nodalia_theme::{Accent, Mode};
 
 use crate::i18n::{self, tr};
 use crate::model::{Connection, Effect, Model, Pending};
-use crate::net::{Net, Reply};
+use crate::net::{self, Net, Reply};
 use crate::settings::{self, SavedSession, Settings, Theme, WindowControls};
 use crate::{chrome, dialogs, signin, view};
 
@@ -52,6 +52,8 @@ pub struct Toast {
 /// The signed-in state.
 pub struct Main {
     pub client: Client,
+    /// This device's end-to-end encryption: every message is sent and read through it.
+    pub secure: Secure,
     pub model: Model,
     pub realtime: Option<Realtime>,
     /// Unsent text, per channel and thread.
@@ -65,6 +67,8 @@ pub struct Main {
     pub last_typing: f64,
     pub focus_composer: bool,
     pub focus_search: bool,
+    /// Things to tell the person, shown as toasts.
+    pub notices: Vec<String>,
 }
 
 /// What the right-hand panel shows.
@@ -214,8 +218,15 @@ impl App {
             }
         };
         self.screen = Screen::Restoring;
+        let dir = self.dir.clone();
         self.net.run(async move {
-            let result = client.me().await.map(|user| (client, user));
+            let result = async {
+                let user = client.me().await?;
+                let path = settings::device_path(dir.as_deref(), client.base().as_str(), user.id);
+                let secure = Secure::open(&client, user.id, path).await?;
+                Ok((client, user, secure))
+            }
+            .await;
             Reply::Restored(result)
         });
     }
@@ -255,6 +266,14 @@ impl App {
         form.error = None;
         let username = form.username.trim().to_lowercase();
         let password = form.password.clone();
+        // A device kept on disk only when the session is: otherwise it lives as long as the window.
+        let dir = self.settings.remember.then(|| self.dir.clone()).flatten();
+        let secured = move |client: Client, session: SessionResponse| async move {
+            let path =
+                settings::device_path(dir.as_deref(), client.base().as_str(), session.user.id);
+            let secure = Secure::open(&client, session.user.id, path).await?;
+            Ok((client, session, secure))
+        };
         if form.register {
             let request = RegisterRequest {
                 username,
@@ -262,17 +281,28 @@ impl App {
                 password,
                 invite_code: Some(form.invite.trim().to_string()).filter(|c| !c.is_empty()),
             };
-            self.net
-                .run(async move { Reply::SignedIn(client.register(&request).await) });
+            self.net.run(async move {
+                let result = match client.register(&request).await {
+                    Ok((client, session)) => secured(client, session).await,
+                    Err(e) => Err(e),
+                };
+                Reply::SignedIn(result)
+            });
         } else {
-            self.net
-                .run(async move { Reply::SignedIn(client.login(&username, &password).await) });
+            self.net.run(async move {
+                let result = match client.login(&username, &password).await {
+                    Ok((client, session)) => secured(client, session).await,
+                    Err(e) => Err(e),
+                };
+                Reply::SignedIn(result)
+            });
         }
     }
 
     fn enter(
         &mut self,
         client: Client,
+        secure: Secure,
         me: agora_protocol::User,
         remember_token: Option<String>,
         now: f64,
@@ -290,12 +320,13 @@ impl App {
                 settings::forget_session(self.dir.as_deref());
             }
         }
-        let realtime = self.net.realtime(&client);
+        let realtime = self.net.realtime(&client, &secure);
         let fetch = client.clone();
         self.net
             .run(async move { Reply::Workspaces(fetch.workspaces().await) });
         self.screen = Screen::Main(Box::new(Main {
             client,
+            secure,
             model: Model::new(me),
             realtime: Some(realtime),
             drafts: HashMap::new(),
@@ -307,6 +338,7 @@ impl App {
             last_typing: 0.0,
             focus_composer: true,
             focus_search: false,
+            notices: Vec::new(),
         }));
     }
 
@@ -336,13 +368,13 @@ impl App {
                 }
             }
             Reply::SignedIn(result) => match result {
-                Ok((client, session)) => {
+                Ok((client, session, secure)) => {
                     if let Screen::SignIn(form) = &self.screen {
                         self.settings.server = form.server.trim().to_string();
                         self.settings.username = session.user.username.clone();
                         self.save_settings(now);
                     }
-                    self.enter(client, session.user, Some(session.token), now);
+                    self.enter(client, secure, session.user, Some(session.token), now);
                 }
                 Err(e) => {
                     if let Screen::SignIn(form) = &mut self.screen {
@@ -353,7 +385,7 @@ impl App {
                 }
             },
             Reply::Restored(result) => match result {
-                Ok((client, user)) => self.enter(client, user, None, now),
+                Ok((client, user, secure)) => self.enter(client, secure, user, None, now),
                 Err(e) if e.is_unauthenticated() => {
                     self.sign_out(Some(tr("Signed out. Sign in again.")))
                 }
@@ -368,7 +400,12 @@ impl App {
                 let Screen::Main(main) = &mut self.screen else {
                     return;
                 };
-                if let Err(e) = main.handle(&self.net, other, now) {
+                let result = main.handle(&self.net, other, now);
+                let notices = std::mem::take(&mut main.notices);
+                for text in notices {
+                    self.toast(text, now);
+                }
+                if let Err(e) = result {
                     if e.is_unauthenticated() {
                         self.sign_out(Some(tr("Signed out. Sign in again.")));
                     } else {
@@ -412,6 +449,14 @@ impl App {
                             rt.close();
                         }
                         let client = main.client.clone();
+                        // Logging out ends this device: its keys and what it decrypted go too.
+                        if let Some(path) = settings::device_path(
+                            self.dir.as_deref(),
+                            client.base().as_str(),
+                            main.model.me.id,
+                        ) {
+                            Secure::wipe(&path);
+                        }
                         self.net.run(async move {
                             let _ = client.logout().await;
                             Reply::LoggedOut
@@ -560,6 +605,11 @@ impl Main {
                 }
             }
             Reply::Done(result) => result?,
+            Reply::Devices {
+                channel,
+                members,
+                joined,
+            } => self.devices_changed(channel, members, joined),
             Reply::Realtime(event) => self.realtime(net, event, now),
             Reply::ServerInfo(..) | Reply::SignedIn(_) | Reply::Restored(_) | Reply::LoggedOut => {}
         }
@@ -608,9 +658,9 @@ impl Main {
         for (channel, last) in loaded {
             match last {
                 Some(after) => {
-                    let client = self.client.clone();
+                    let secure = self.secure.clone();
                     net.run(async move {
-                        let result = client.history(channel, None, Some(after), Some(200)).await;
+                        let result = net::history(&secure, channel, None, Some(after), 200).await;
                         Reply::History {
                             channel,
                             before: None,
@@ -659,9 +709,9 @@ impl Main {
             return;
         }
         conv.loading = true;
-        let client = self.client.clone();
+        let secure = self.secure.clone();
         net.run(async move {
-            let result = client.history(channel, before, None, Some(50)).await;
+            let result = net::history(&secure, channel, before, None, 50).await;
             Reply::History {
                 channel,
                 before,
@@ -672,8 +722,8 @@ impl Main {
     }
 
     fn load_thread(&self, net: &Net, root: MessageId) {
-        let client = self.client.clone();
-        net.run(async move { Reply::Thread(client.thread(root).await) });
+        let secure = self.secure.clone();
+        net.run(async move { Reply::Thread(net::thread(&secure, root).await) });
     }
 
     pub fn select_workspace(&mut self, net: &Net, ws: WorkspaceId) {
@@ -707,6 +757,10 @@ impl Main {
         if needs {
             self.load_history(net, id, None);
         }
+        if changed {
+            let secure = self.secure.clone();
+            net.run(async move { net::devices(&secure, id).await });
+        }
         if let Some(ws) = self.model.workspace {
             if !self.model.members.contains_key(&ws) {
                 self.load_members(net, ws);
@@ -729,25 +783,84 @@ impl Main {
     fn post(&mut self, net: &Net, pending: Pending) {
         let channel = pending.channel;
         let nonce = pending.nonce.clone();
-        let request = PostMessageRequest {
-            body: pending.body.clone(),
-            client_nonce: pending.nonce.clone(),
-            thread_root_id: pending.thread_root,
-        };
+        let body = pending.body.clone();
+        let thread = pending.thread_root;
+        let mentions = self.mentioned(&body);
         if let Some(p) = self.model.pending.iter_mut().find(|p| p.nonce == nonce) {
             p.failed = false;
         } else {
             self.model.pending.push(pending);
         }
-        let client = self.client.clone();
+        let secure = self.secure.clone();
         net.run(async move {
-            let result = client.post_message(channel, &request).await;
+            let result = secure.post(channel, &body, &nonce, thread, mentions).await;
             Reply::Posted {
                 channel,
                 nonce,
                 result,
             }
         });
+    }
+
+    /// The people a message mentions, by id: the server only keeps those who can read it, and
+    /// cannot find them itself because it never sees the text.
+    fn mentioned(&self, body: &str) -> Vec<UserId> {
+        let Some(members) = self
+            .model
+            .workspace
+            .and_then(|ws| self.model.members.get(&ws))
+        else {
+            return Vec::new();
+        };
+        let mut ids: Vec<UserId> = agora_core::format::mentions(body)
+            .iter()
+            .filter_map(|name| {
+                members
+                    .iter()
+                    .find(|m| m.user.username.eq_ignore_ascii_case(name))
+                    .map(|m| m.user.id)
+            })
+            .collect();
+        ids.sort_by_key(|id| id.0);
+        ids.dedup();
+        ids
+    }
+
+    /// A conversation's devices changed. A device of someone else's that joins the conversation
+    /// open on screen is announced: a device nobody expected is how a server would listen in.
+    fn devices_changed(
+        &mut self,
+        channel: ChannelId,
+        members: Vec<agora_e2e::Leaf>,
+        joined: Vec<agora_e2e::Leaf>,
+    ) {
+        let known = self.model.devices.insert(channel, members).is_some();
+        if !known || self.model.channel != Some(channel) {
+            return;
+        }
+        let me = self.model.me.id;
+        let names: Vec<String> = joined
+            .iter()
+            .filter(|leaf| leaf.user != me)
+            .map(|leaf| {
+                let name = self
+                    .model
+                    .workspace
+                    .and_then(|ws| self.model.members.get(&ws))
+                    .and_then(|list| list.iter().find(|m| m.user.id == leaf.user))
+                    .map_or_else(
+                        || tr("Someone").to_string(),
+                        |m| m.user.display_name.clone(),
+                    );
+                format!("{name} ({})", agora_e2e::fingerprint(&leaf.public_key))
+            })
+            .collect();
+        if !names.is_empty() {
+            self.notices.push(i18n::trf(
+                "New device in this conversation: {}",
+                &[&names.join(", ")],
+            ));
+        }
     }
 
     fn act(&mut self, net: &Net, action: Action, now: f64) {
@@ -829,8 +942,12 @@ impl Main {
             }
             Action::SaveEdit(id, body) => {
                 self.dialog = None;
-                let client = self.client.clone();
-                net.run(async move { Reply::Edited(client.edit_message(id, &body).await) });
+                let Some(message) = self.find_message(id) else {
+                    return;
+                };
+                let mentions = self.mentioned(&body);
+                let secure = self.secure.clone();
+                net.run(async move { Reply::Edited(secure.edit(&message, &body, mentions).await) });
             }
             Action::Delete(id) => {
                 self.dialog = None;
@@ -912,9 +1029,9 @@ impl Main {
                     self.results = None;
                     return;
                 }
-                let client = self.client.clone();
+                let secure = self.secure.clone();
                 net.run(async move {
-                    let result = client.search(ws, &query).await;
+                    let result = secure.search(ws, &query).await;
                     Reply::Search(query, result)
                 });
             }
@@ -951,6 +1068,12 @@ impl Main {
             .values()
             .flat_map(|c| c.messages.iter())
             .chain(self.results.iter().flat_map(|(_, r)| r.iter()))
+            .chain(
+                self.model
+                    .thread
+                    .iter()
+                    .flat_map(|t| std::iter::once(&t.root).chain(t.replies.iter())),
+            )
             .find(|m| m.id == id)
             .cloned()
     }
