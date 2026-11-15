@@ -77,9 +77,13 @@ impl Inner {
     }
 }
 
-/// Write `bytes` to `path` readable by its owner only, replacing it atomically.
+/// Write `bytes` to `path` readable by its owner only, replacing it atomically. The folder is
+/// created when missing: on a first launch nothing has made the settings folder yet.
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_extension("tmp");
     {
         let mut options = std::fs::OpenOptions::new();
@@ -563,5 +567,26 @@ impl Secure {
         found.truncate(50);
         self.fill(&mut found).await;
         Ok(SearchResults { messages: found })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_private;
+
+    #[test]
+    fn the_device_file_is_written_into_a_folder_that_does_not_exist_yet() {
+        let root = std::env::temp_dir().join(format!("agora-secure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let path = root.join("first-launch").join("device.json");
+        write_private(&path, b"keys").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"keys");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
