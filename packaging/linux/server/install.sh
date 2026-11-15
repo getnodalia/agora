@@ -57,6 +57,7 @@ else
   echo "Kept your /etc/agora/agora.toml"
 fi
 
+install -d -m 755 "$(dirname "$unit")"
 sed "s|/usr/bin/agora-server|$bin|" "$here/agora-server.service" >"$unit.new"
 chmod 644 "$unit.new"
 mv -f "$unit.new" "$unit"
