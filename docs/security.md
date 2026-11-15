@@ -3,13 +3,63 @@
 What Ágora protects, how, and what it does not do. Report a vulnerability as
 [SECURITY.md](../SECURITY.md) says, never in a public issue.
 
+## End-to-end encryption
+
+Every message in every channel and direct message is encrypted on the sender's device and
+decrypted on the readers' devices. The server stores and relays only ciphertext and cannot read
+the text, and neither can whoever gets a copy of its database or backups.
+
+- **Protocol**: Messaging Layer Security (MLS, [RFC 9420](https://www.rfc-editor.org/rfc/rfc9420)),
+  through the [OpenMLS](https://github.com/openmls/openmls) library (MIT; its HPKE dependency
+  `hpke-rs` is MPL-2.0, used unmodified), with the ciphersuite
+  `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`. Nothing in Ágora is a cryptographic algorithm
+  of its own; `crates/agora-e2e` only decides when to create, join, add, remove and encrypt.
+- **One group per conversation**, one member per device. A device is a session: signing in on a
+  laptop adds a new device with its own keys, and logging out removes it at the next message.
+  Handshake and application messages are encrypted (`PURE_CIPHERTEXT`).
+- **The server keeps the order.** Each conversation has a log of commits and messages with a
+  sequence number. A commit is accepted only at the current epoch, which moves the group to the
+  next one atomically; a message only at the current epoch (`stale_epoch` otherwise, and the
+  client catches up and tries again).
+- **Who can read.** Before sending, a device removes from the group every device that may no
+  longer read the conversation (someone left, a session ended) and adds those that may, from the
+  key packages they published, with a Welcome they pick up when they come online. Someone who
+  leaves cannot read what is said after; back in the channel, they still cannot read what was
+  said while they were out.
+- **New devices read from when they were added.** A laptop signed in today cannot decrypt last
+  week's messages: it never had those keys. The desktop app says so in place of the text.
+- **Forward secrecy.** MLS deletes message keys once used and keeps no past epochs. To show
+  history again, a device keeps the text it decrypted in its own device file
+  (`device-*.json` in the config folder, mode `0600`, written atomically). Without "Keep me signed
+  in" the device lives in memory only. Log out deletes the file.
+- **Checks on what arrives.** A decrypted message must come from a device of the account the server
+  says wrote it, and an edit must name the message it edits; otherwise it is shown as unreadable.
+- **Search** runs on the device, over its decrypted copy. The server's search finds nothing in
+  encrypted messages.
+
+### What the server still sees
+
+End-to-end encryption hides the text, not the rest:
+
+- who is in which workspace and channel, channel names and topics, who sent a message when, its
+  size, which thread it belongs to, and whom it mentions (the sender's device tells the server,
+  so it can count unread mentions);
+- reactions (the emoji, in clear), read markers, typing and presence;
+- the devices of each person and when they change.
+
+### What it does not protect against
+
+- **A server that lies about devices.** The server says which devices may read a conversation, so
+  a malicious server could add a device of its own to a person's account and be let in. Ágora
+  makes this visible rather than impossible: the conversation's details list every device that
+  can read it with its fingerprint, and a new device of someone else's in the open conversation
+  is announced. Compare fingerprints in person to be sure. Verified identities are planned.
+- **A compromised device.** Whoever controls a device reads what it reads, including its device
+  file.
+- **No independent audit** of Ágora's use of MLS yet.
+
 ## What Ágora is not
 
-- **No end-to-end encryption.** The server stores every message in clear text in its database and
-  can read it, as in Slack, Teams or Discord. Whoever runs the server, and whoever gets a copy of
-  its database or backups, can read the conversations. Do not describe Ágora as end-to-end
-  encrypted. If it is ever added, it will use an audited, standard protocol (such as MLS), never
-  an algorithm of our own.
 - **No transport encryption of its own.** The server speaks plain HTTP and WebSocket and expects a
   TLS reverse proxy in front of it ([deployment.md](deployment.md)). It refuses to listen on a
   non-loopback address unless `trust_proxy` (a TLS proxy is in front) or
@@ -47,9 +97,11 @@ What Ágora protects, how, and what it does not do. Report a vulnerability as
 ## Input and output
 
 - Every input is validated (`agora_core::validate`): names, lengths, Unicode control characters.
-  Message bodies are at most 8000 characters, request bodies 64 KiB, WebSocket frames 16 KiB.
+  Message bodies are at most 8000 characters, request bodies 1 MiB (a large conversation's
+  GroupInfo is big), WebSocket frames 16 KiB. The server validates ciphertext as MLS before
+  storing it; the client validates the decrypted text with the same rules.
 - All SQL goes through SQLx with bound parameters; no query is built from strings.
-- Messages are stored as the text the person typed. The desktop app renders a small Markdown subset
+- Messages are stored encrypted. The desktop app renders a small Markdown subset
   itself and never interprets HTML; links open only on a click. Responses carry
   `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`, ready for a web client.
 - A message carries a client nonce: a retry after a lost reply returns the stored message instead of
@@ -65,11 +117,12 @@ per account (1200), typing notices (30); at most 16 WebSockets per account. All 
 ## Logs
 
 The server logs events with ids (`account created user=2`), never passwords, tokens, invitation
-codes or message text. At `debug` level the HTTP trace prints request paths, which include search
+codes, keys or message text (which it does not have). At `debug` level the HTTP trace prints request paths, which include search
 terms; keep production at `info` (the default).
 
 ## Known limits
 
 - No two-factor sign-in, password reset by email or account deletion yet.
 - Rate limits are kept in memory per server process.
-- A server administrator can read the database: see "What Ágora is not".
+- A server administrator can see metadata and could try to add a device: see "End-to-end
+  encryption".

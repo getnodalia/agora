@@ -8,29 +8,19 @@ mod common;
 use std::time::Duration;
 
 use agora_client::{new_nonce, ClientError, RealtimeEvent};
-use agora_protocol::{
-    CreateChannelRequest, CreateInviteRequest, ErrorCode, PostMessageRequest, ServerEvent,
-};
+use agora_protocol::{CreateChannelRequest, CreateInviteRequest, ErrorCode, ServerEvent};
 use common::*;
-
-fn post(body: &str) -> PostMessageRequest {
-    PostMessageRequest {
-        body: body.into(),
-        client_nonce: new_nonce(),
-        thread_root_id: None,
-    }
-}
 
 /// Ana creates a workspace and invites Luis; both end up in #general.
 async fn ana_and_luis(
     server: &Server,
 ) -> (
-    agora_client::Client,
-    agora_client::Client,
+    Person,
+    Person,
     agora_protocol::Workspace,
     agora_protocol::Channel,
 ) {
-    let (ana, _) = register(server, "ana").await;
+    let ana = Person::register(server, "ana").await;
     let ws = ana.create_workspace("Laboratorio").await.unwrap();
     let invite = ana
         .create_invite(
@@ -43,7 +33,7 @@ async fn ana_and_luis(
         )
         .await
         .unwrap();
-    let (luis, _) = register(server, "luis").await;
+    let luis = Person::register(server, "luis").await;
     luis.join_workspace(&invite.code).await.unwrap();
     let general = ana
         .channels(ws.id)
@@ -65,15 +55,17 @@ async fn two_users_exchange_messages_in_real_time() {
     luis_live.ready().await;
 
     let sent = ana
-        .post_message(general.id, &post("¿Probamos el banco de ensayo? 🔧"))
-        .await
-        .unwrap();
+        .say(general.id, "¿Probamos el banco de ensayo? 🔧")
+        .await;
     let got = luis_live
         .server_event(|e| match e {
             ServerEvent::MessageCreated { message } => Some(message.clone()),
             _ => None,
         })
         .await;
+    // What travels is ciphertext: the event carries no text until Luis's device decrypts it.
+    assert!(got.encrypted && got.body.is_empty());
+    let got = luis.read(got).await;
     assert_eq!(got.id, sent.id);
     assert_eq!(got.body, "¿Probamos el banco de ensayo? 🔧");
     assert_eq!(got.author.username, "ana");
@@ -84,18 +76,16 @@ async fn two_users_exchange_messages_in_real_time() {
     luis.mark_read(general.id, sent.id).await.unwrap();
     assert_eq!(luis.channel(general.id).await.unwrap().unread, 0);
 
-    luis.post_message(general.id, &post("Sí, a las **17:00**"))
-        .await
-        .unwrap();
+    luis.say(general.id, "Sí, a las **17:00**").await;
     let reply = ana_live
         .server_event(|e| match e {
             ServerEvent::MessageCreated { message } if message.author.username == "luis" => {
-                Some(message.body.clone())
+                Some(message.clone())
             }
             _ => None,
         })
         .await;
-    assert_eq!(reply, "Sí, a las **17:00**");
+    assert_eq!(ana.read(reply).await.body, "Sí, a las **17:00**");
 
     server.stop().await;
 }
@@ -105,20 +95,9 @@ async fn messages_survive_a_server_restart() {
     let (dir, db) = temp_db("restart");
     let server = Server::start(&db).await;
     let (ana, luis, _ws, general) = ana_and_luis(&server).await;
-    let first = ana
-        .post_message(general.id, &post("antes del reinicio"))
-        .await
-        .unwrap();
-    let root = luis.post_message(general.id, &post("hilo")).await.unwrap();
-    ana.post_message(
-        general.id,
-        &PostMessageRequest {
-            thread_root_id: Some(root.id),
-            ..post("respuesta")
-        },
-    )
-    .await
-    .unwrap();
+    let first = ana.say(general.id, "antes del reinicio").await;
+    let root = luis.say(general.id, "hilo").await;
+    ana.reply(general.id, root.id, "respuesta").await;
     let port = server.port();
     let ana_token = ana.token().unwrap().to_owned();
     server.stop().await;
@@ -132,16 +111,17 @@ async fn messages_survive_a_server_restart() {
         port,
     )
     .await;
-    let ana = server.anonymous().with_token(ana_token);
-    let page = ana.history(general.id, None, None, None).await.unwrap();
+    // The same device (its keys and what it decrypted) with the same session.
+    let ana = Person {
+        client: server.anonymous().with_token(ana_token),
+        ..ana
+    };
+    let page = ana.history(general.id).await;
     let bodies: Vec<_> = page.messages.iter().map(|m| m.body.as_str()).collect();
     assert_eq!(bodies, ["antes del reinicio", "hilo"]);
     assert_eq!(page.messages[0].id, first.id);
     assert_eq!(page.messages[1].reply_count, 1);
-    assert_eq!(
-        ana.thread(root.id).await.unwrap().replies[0].body,
-        "respuesta"
-    );
+    assert_eq!(ana.thread(root.id).await.replies[0].body, "respuesta");
     server.stop().await;
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -164,10 +144,7 @@ async fn private_channels_are_invisible_to_non_members() {
         )
         .await
         .unwrap();
-    let msg = ana
-        .post_message(secret.id, &post("presupuesto confidencial"))
-        .await
-        .unwrap();
+    let msg = ana.say(secret.id, "presupuesto confidencial").await;
 
     // Not listed, not readable, not writable, not searchable, no thread, no reactions, no events.
     assert!(luis
@@ -177,19 +154,21 @@ async fn private_channels_are_invisible_to_non_members() {
         .iter()
         .all(|c| c.id != secret.id));
     for err in [
-        luis.history(secret.id, None, None, None).await.err(),
+        luis.client.history(secret.id, None, None, None).await.err(),
         luis.channel(secret.id).await.err(),
-        luis.post_message(secret.id, &post("hola")).await.err(),
+        luis.try_say(secret.id, "hola").await.err(),
         luis.join_channel(secret.id).await.err(),
-        luis.thread(msg.id).await.err(),
+        luis.client.thread(msg.id).await.err(),
         luis.react(msg.id, "👀").await.err(),
-        luis.edit_message(msg.id, "x").await.err(),
+        luis.edit(&msg, "x").await.err(),
         luis.delete_message(msg.id).await.err(),
         luis.mark_read(secret.id, msg.id).await.err(),
+        luis.mls_state(secret.id, Some(0)).await.err(),
     ] {
         assert_eq!(err.and_then(|e| e.code()), Some(ErrorCode::NotFound));
     }
     assert!(luis
+        .e2e
         .search(ws.id, "confidencial")
         .await
         .unwrap()
@@ -199,18 +178,16 @@ async fn private_channels_are_invisible_to_non_members() {
         .assert_none(Duration::from_millis(300), |e| matches!(e, ServerEvent::MessageCreated { message } if message.channel_id == secret.id))
         .await;
 
-    // Once added, Luis reads it.
-    ana.add_channel_member(secret.id, luis.me().await.unwrap().id)
+    // Once added, Luis sees that the message exists, but its text was encrypted before his
+    // device was in the conversation; what is written from now on he reads.
+    ana.add_channel_member(secret.id, luis.user.id)
         .await
         .unwrap();
-    assert_eq!(
-        luis.history(secret.id, None, None, None)
-            .await
-            .unwrap()
-            .messages
-            .len(),
-        1
-    );
+    let page = luis.history(secret.id).await;
+    assert_eq!(page.messages.len(), 1);
+    assert!(page.messages[0].body.is_empty());
+    let next = ana.say(secret.id, "bienvenido, Luis").await;
+    assert_eq!(luis.read(next).await.body, "bienvenido, Luis");
     server.stop().await;
 }
 
@@ -218,25 +195,26 @@ async fn private_channels_are_invisible_to_non_members() {
 async fn workspaces_are_isolated_from_each_other() {
     let server = Server::start("sqlite::memory:").await;
     let (ana, _luis, ws_a, general_a) = ana_and_luis(&server).await;
-    let (eva, eva_user) = register(&server, "eva").await;
+    let eva = Person::register(&server, "eva").await;
+    let eva_user = eva.user.clone();
     let ws_b = eva.create_workspace("Otra empresa").await.unwrap();
     let general_b = eva.channels(ws_b.id).await.unwrap()[0].clone();
-    let msg_b = eva
-        .post_message(general_b.id, &post("solo para la empresa B"))
-        .await
-        .unwrap();
+    let msg_b = eva.say(general_b.id, "solo para la empresa B").await;
     let ana_user = ana.me().await.unwrap();
 
     // Ana (workspace A) cannot see anything of workspace B, nor Eva anything of A.
     for err in [
         ana.channels(ws_b.id).await.err(),
         ana.members(ws_b.id).await.err(),
-        ana.history(general_b.id, None, None, None).await.err(),
-        ana.post_message(general_b.id, &post("intrusión"))
+        ana.client
+            .history(general_b.id, None, None, None)
             .await
             .err(),
-        ana.thread(msg_b.id).await.err(),
-        ana.search(ws_b.id, "empresa").await.err(),
+        ana.try_say(general_b.id, "intrusión").await.err(),
+        ana.mls_state(general_b.id, Some(0)).await.err(),
+        ana.client.thread(msg_b.id).await.err(),
+        ana.client.search(ws_b.id, "empresa").await.err(),
+        ana.lookup_messages(ws_b.id, &[msg_b.id]).await.err(),
         ana.create_invite(
             ws_b.id,
             &CreateInviteRequest {
@@ -247,7 +225,10 @@ async fn workspaces_are_isolated_from_each_other() {
         )
         .await
         .err(),
-        eva.history(general_a.id, None, None, None).await.err(),
+        eva.client
+            .history(general_a.id, None, None, None)
+            .await
+            .err(),
         eva.open_direct(ws_a.id, ana_user.id).await.err(),
         // Nor can A open a direct conversation with someone outside A.
         ana.open_direct(ws_a.id, eva_user.id).await.err(),
@@ -296,12 +277,15 @@ async fn retried_messages_do_not_corrupt_history() {
     luis_live.ready().await;
 
     // The same send retried ten times at once (a flaky network): one message, one event.
-    let req = post("sólo una vez");
-    let attempts = (0..10).map(|_| ana.post_message(general.id, &req));
+    let nonce = new_nonce();
+    let attempts = (0..10).map(|_| {
+        ana.e2e
+            .post(general.id, "sólo una vez", &nonce, None, Vec::new())
+    });
     let results = futures_util::future::join_all(attempts).await;
     let ids: std::collections::HashSet<_> = results.into_iter().map(|r| r.unwrap().id).collect();
     assert_eq!(ids.len(), 1);
-    let page = ana.history(general.id, None, None, None).await.unwrap();
+    let page = ana.history(general.id).await;
     assert_eq!(
         page.messages
             .iter()
@@ -330,7 +314,11 @@ async fn retried_messages_do_not_corrupt_history() {
         )
         .await
         .unwrap();
-    let err = ana.post_message(other.id, &req).await.unwrap_err();
+    let err = ana
+        .e2e
+        .post(other.id, "sólo una vez", &nonce, None, Vec::new())
+        .await
+        .unwrap_err();
     assert_eq!(err.code(), Some(ErrorCode::Conflict));
     server.stop().await;
 }
@@ -339,24 +327,22 @@ async fn retried_messages_do_not_corrupt_history() {
 async fn direct_messages_and_threads() {
     let server = Server::start("sqlite::memory:").await;
     let (ana, luis, ws, general) = ana_and_luis(&server).await;
-    let luis_user = luis.me().await.unwrap();
+    let luis_user = luis.user.clone();
     let mut luis_live = Live::open(&luis);
     luis_live.ready().await;
 
     let dm = ana.open_direct(ws.id, luis_user.id).await.unwrap();
     assert_eq!(dm.peer.as_ref().unwrap().username, "luis");
-    ana.post_message(dm.id, &post("¿tienes un momento?"))
-        .await
-        .unwrap();
+    ana.say(dm.id, "¿tienes un momento?").await;
     let got = luis_live
         .server_event(|e| match e {
             ServerEvent::MessageCreated { message } if message.channel_id == dm.id => {
-                Some(message.body.clone())
+                Some(message.clone())
             }
             _ => None,
         })
         .await;
-    assert_eq!(got, "¿tienes un momento?");
+    assert_eq!(luis.read(got).await.body, "¿tienes un momento?");
     let luis_dm = luis
         .channels(ws.id)
         .await
@@ -367,35 +353,18 @@ async fn direct_messages_and_threads() {
     assert_eq!(luis_dm.peer.unwrap().username, "ana");
 
     // Threads: replies stay out of the channel's history and update the root.
-    let root = ana
-        .post_message(general.id, &post("propuesta: migrar a SQLite WAL"))
-        .await
-        .unwrap();
-    let reply = luis
-        .post_message(
-            general.id,
-            &PostMessageRequest {
-                thread_root_id: Some(root.id),
-                ..post("de acuerdo")
-            },
-        )
-        .await
-        .unwrap();
+    let root = ana.say(general.id, "propuesta: migrar a SQLite WAL").await;
+    let reply = luis.reply(general.id, root.id, "de acuerdo").await;
     assert_eq!(reply.thread_root_id, Some(root.id));
-    let thread = ana.thread(root.id).await.unwrap();
+    let thread = ana.thread(root.id).await;
     assert_eq!(thread.root.reply_count, 1);
     assert_eq!(thread.replies[0].body, "de acuerdo");
-    let history = ana.history(general.id, None, None, None).await.unwrap();
+    let history = ana.history(general.id).await;
     assert!(history.messages.iter().all(|m| m.thread_root_id.is_none()));
     // No nested threads.
     let nested = luis
-        .post_message(
-            general.id,
-            &PostMessageRequest {
-                thread_root_id: Some(reply.id),
-                ..post("x")
-            },
-        )
+        .e2e
+        .post(general.id, "x", &new_nonce(), Some(reply.id), Vec::new())
         .await;
     assert_eq!(nested.unwrap_err().code(), Some(ErrorCode::Invalid));
     server.stop().await;
@@ -426,16 +395,14 @@ async fn the_client_reconnects_after_the_server_restarts() {
         luis_live.ready().await,
         "second connection should report a reconnection"
     );
-    ana.post_message(general.id, &post("¿me oyes otra vez?"))
-        .await
-        .unwrap();
-    let body = luis_live
+    ana.say(general.id, "¿me oyes otra vez?").await;
+    let got = luis_live
         .server_event(|e| match e {
-            ServerEvent::MessageCreated { message } => Some(message.body.clone()),
+            ServerEvent::MessageCreated { message } => Some(message.clone()),
             _ => None,
         })
         .await;
-    assert_eq!(body, "¿me oyes otra vez?");
+    assert_eq!(luis.read(got).await.body, "¿me oyes otra vez?");
     server.stop().await;
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -446,20 +413,23 @@ async fn edits_deletes_and_reactions_follow_the_rules() {
     let (ana, luis, _ws, general) = ana_and_luis(&server).await;
     let mut ana_live = Live::open(&ana);
     ana_live.ready().await;
-    let msg = luis.post_message(general.id, &post("tpyo")).await.unwrap();
+    let msg = luis.say(general.id, "tpyo").await;
 
     assert_eq!(
-        ana.edit_message(msg.id, "hack").await.unwrap_err().code(),
+        ana.edit(&msg, "hack").await.unwrap_err().code(),
         Some(ErrorCode::Forbidden)
     );
-    let edited = luis.edit_message(msg.id, "typo").await.unwrap();
+    let edited = luis.edit(&msg, "typo").await.unwrap();
     assert!(edited.edited_at.is_some());
-    ana_live
-        .server_event(|e| {
-            matches!(e, ServerEvent::MessageUpdated { message } if message.body == "typo")
-                .then_some(())
+    let updated = ana_live
+        .server_event(|e| match e {
+            ServerEvent::MessageUpdated { message } if message.id == msg.id => {
+                Some(message.clone())
+            }
+            _ => None,
         })
         .await;
+    assert_eq!(ana.read(updated).await.body, "typo");
 
     let reactions = ana.react(msg.id, "👍").await.unwrap();
     assert_eq!((reactions[0].emoji.as_str(), reactions[0].count), ("👍", 1));
@@ -469,16 +439,20 @@ async fn edits_deletes_and_reactions_follow_the_rules() {
     );
 
     // Luis (a member) cannot delete Ana's messages; Ana (the owner) can moderate Luis's.
-    let ana_msg = ana.post_message(general.id, &post("mío")).await.unwrap();
+    let ana_msg = ana.say(general.id, "mío").await;
     assert_eq!(
         luis.delete_message(ana_msg.id).await.unwrap_err().code(),
         Some(ErrorCode::Forbidden)
     );
     ana.delete_message(msg.id).await.unwrap();
-    let after = ana.history(general.id, None, None, None).await.unwrap();
+    let after = ana.history(general.id).await;
     let gone = after.messages.iter().find(|m| m.id == msg.id).unwrap();
     assert!(gone.deleted && gone.body.is_empty() && gone.reactions.is_empty());
     server.stop().await;
+}
+
+async fn luis_reads(luis: &Person, message: agora_protocol::Message) -> String {
+    luis.read(message).await.body
 }
 
 #[tokio::test]
@@ -486,10 +460,10 @@ async fn markup_is_stored_as_text() {
     let server = Server::start("sqlite::memory:").await;
     let (ana, _luis, _ws, general) = ana_and_luis(&server).await;
     let evil = "<img src=x onerror=alert(1)> ```\n<script>alert(2)</script>\n```";
-    let msg = ana.post_message(general.id, &post(evil)).await.unwrap();
-    assert_eq!(msg.body, evil);
+    let msg = ana.say(general.id, evil).await;
+    assert_eq!(luis_reads(&_luis, msg).await, evil);
     let control = ana
-        .post_message(general.id, &post("abc\u{202E}gnp.exe"))
+        .try_say(general.id, "abc\u{202E}gnp.exe")
         .await
         .unwrap_err();
     assert_eq!(control.code(), Some(ErrorCode::Invalid));

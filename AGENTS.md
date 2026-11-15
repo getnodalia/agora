@@ -25,7 +25,8 @@ interface. Machine names are `agora`. The app ID is `dev.danielmiguelt.Agora`, t
 | `crates/agora-core` | Ids, roles and permissions, limits, validation, the message text format. No I/O |
 | `crates/agora-protocol` | The wire contract: HTTP bodies under `/api/v1`, WebSocket frames and events |
 | `crates/agora-storage` | SQLite through SQLx, migrations in `migrations/`. All SQL lives here |
-| `crates/agora-client` | HTTP calls and the reconnecting real-time connection, for every client |
+| `crates/agora-e2e` | End-to-end encryption: a device, its MLS groups and the text it decrypted. No I/O |
+| `crates/agora-client` | HTTP calls, the reconnecting real-time connection, and `Secure` (encrypt, sync, decrypt) |
 | `apps/agora-server` | Axum routes, authentication, the event hub, limits, configuration |
 | `apps/agora-desktop` | The egui app: `model.rs` (state and reducer), `net.rs` (requests off the UI thread), `view.rs`, `dialogs.rs`, `signin.rs`, `widgets.rs`, `i18n.rs` |
 
@@ -39,6 +40,7 @@ request runs on its Tokio runtime and comes back as a `net::Reply`.
 ```bash
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked   # the CI gate
 cargo test -p agora-server --test mvp        # end-to-end tests against a real server
+cargo test -p agora-server --test e2e        # what the server stores, who can read what
 cargo run -p agora-server                    # http://127.0.0.1:7878, ./agora.db
 AGORA_DESKTOP_DIR=/tmp/a cargo run -p agora-desktop   # one client per folder
 ```
@@ -55,8 +57,10 @@ display, run it under `Xvfb` and drive it with `xdotool`. Linux needs `libxkbcom
   membership checks in `apps/agora-server/src/routes/mod.rs`. Something you cannot see answers 404.
   Every new route gets a test that a non-member is refused.
 - **No secrets in logs**: never log passwords, tokens, invitation codes or message text.
-- **No home-made cryptography**, and never describe Ágora as end-to-end encrypted. It is not
-  (`docs/security.md`).
+- **No home-made cryptography.** Messages are end-to-end encrypted with MLS through OpenMLS
+  (`crates/agora-e2e`); the server stores ciphertext only and must never need the text. Describe
+  exactly what it protects and what it does not, as `docs/security.md` does (metadata, reactions
+  and the device list are visible to the server).
 - **SQL only through SQLx with bound parameters**, and only in `agora-storage`.
 - **No mandatory external services.** The server runs offline. Builds and CI use free GitHub
   runners only.

@@ -42,6 +42,7 @@ async fn retried_nonce_returns_the_same_message() {
         body: "hola",
         nonce: "n1",
         mentioned: &[],
+        ciphertext: None,
         now: 5,
     };
     let Inserted::Created(first) = s.insert_message(new.clone()).await.unwrap() else {
@@ -74,6 +75,7 @@ async fn replies_update_their_root_and_stay_out_of_history() {
         body: "x",
         nonce,
         mentioned: &[],
+        ciphertext: None,
         now: 9,
     };
     let Inserted::Created(root) = s.insert_message(msg("a", None)).await.unwrap() else {
@@ -104,6 +106,7 @@ async fn history_pages_backwards_and_catches_up_forwards() {
                 body: "x",
                 nonce: &nonce,
                 mentioned: &[],
+                ciphertext: None,
                 now: i,
             })
             .await
@@ -212,6 +215,7 @@ async fn unread_counts_and_reactions() {
             body: "@luis mira",
             nonce: "n",
             mentioned: &[luis.id],
+            ciphertext: None,
             now: 3,
         })
         .await
@@ -270,6 +274,7 @@ async fn search_respects_what_a_user_can_read() {
             body,
             nonce,
             mentioned: &[],
+            ciphertext: None,
             now: 4,
         })
         .await
@@ -313,4 +318,65 @@ async fn data_survives_reopening_the_file() {
     assert!(s.user_credentials("ana").await.unwrap().is_some());
     s.close().await;
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn the_encrypted_log_moves_one_epoch_at_a_time() {
+    let s = store().await;
+    let ana = s.create_user("ana", "Ana", "h", 1).await.unwrap();
+    let ws = s.create_workspace("Lab", ana.id, 1).await.unwrap();
+    let general = s.channels_for(ws, ana.id, Role::Owner).await.unwrap()[0].id;
+
+    // No group yet: nothing encrypted can be stored.
+    let send = |epoch: u64, nonce: &'static str| NewMessage {
+        channel: general,
+        author: ana.id,
+        thread_root: None,
+        body: "",
+        nonce,
+        mentioned: &[],
+        ciphertext: Some((b"sealed", epoch)),
+        now: 2,
+    };
+    assert!(matches!(
+        s.insert_message(send(0, "a")).await,
+        Err(StoreError::StaleEpoch)
+    ));
+    s.create_mls_group(general, 0, b"info0", 2).await.unwrap();
+    assert!(matches!(
+        s.create_mls_group(general, 0, b"again", 2).await,
+        Err(StoreError::Conflict)
+    ));
+    let Inserted::Created(m) = s.insert_message(send(0, "b")).await.unwrap() else {
+        panic!("expected a new message");
+    };
+    assert!(m.encrypted && m.body.is_empty() && m.content_seq.is_some());
+
+    // A commit for epoch 0 moves the group to 1; a second one for 0 lost the race.
+    s.mls_commit(general, 0, b"c0", b"info1", None, ana.id, 3)
+        .await
+        .unwrap();
+    assert!(matches!(
+        s.mls_commit(general, 0, b"c0bis", b"x", None, ana.id, 3)
+            .await,
+        Err(StoreError::StaleEpoch)
+    ));
+    assert!(matches!(
+        s.insert_message(send(0, "c")).await,
+        Err(StoreError::StaleEpoch)
+    ));
+    assert_eq!(
+        s.mls_group(general).await.unwrap().unwrap(),
+        (1, b"info1".to_vec())
+    );
+    let (log, more) = s.mls_log(general, 0, 10).await.unwrap();
+    assert!(!more);
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].message, Some(m.id));
+
+    // Deleting a message erases its ciphertext but keeps the entry, so devices keep their place.
+    s.delete_message(m.id, 4).await.unwrap();
+    let (log, _) = s.mls_log(general, 0, 10).await.unwrap();
+    assert_eq!(log.len(), 2);
+    assert!(log[0].data.is_empty());
 }

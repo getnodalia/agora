@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod channels;
+pub mod e2e;
 pub mod messages;
 pub mod workspaces;
 
@@ -11,7 +12,7 @@ use std::net::{IpAddr, SocketAddr};
 use agora_core::{roles, ChannelId, Role, UserId, WorkspaceId};
 use agora_storage::ChannelRow;
 use axum::http::HeaderMap;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use axum::Router;
 
 use crate::error::{AppError, AppResult};
@@ -24,6 +25,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", post(accounts::login))
         .route("/auth/logout", post(accounts::logout))
         .route("/me", get(accounts::me).patch(accounts::update_me))
+        .route("/devices/me", put(e2e::register_device))
+        .route("/devices/me/key_packages", post(e2e::publish_key_packages))
         .route(
             "/workspaces",
             get(workspaces::list).post(workspaces::create),
@@ -38,6 +41,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/workspaces/{id}/direct", post(channels::open_direct))
         .route("/workspaces/{id}/search", get(messages::search))
+        .route("/workspaces/{id}/messages/lookup", post(messages::lookup))
         .route(
             "/channels/{id}",
             get(channels::get_one).patch(channels::update),
@@ -46,6 +50,13 @@ pub fn router() -> Router<AppState> {
         .route("/channels/{id}/leave", post(channels::leave))
         .route("/channels/{id}/members", post(channels::add_member))
         .route("/channels/{id}/read", post(channels::mark_read))
+        .route("/channels/{id}/mls", get(e2e::state))
+        .route("/channels/{id}/mls/group", post(e2e::create_group))
+        .route("/channels/{id}/mls/commit", post(e2e::commit))
+        .route(
+            "/channels/{id}/mls/key_packages",
+            post(e2e::claim_key_packages),
+        )
         .route(
             "/channels/{id}/messages",
             get(messages::history).post(messages::post),

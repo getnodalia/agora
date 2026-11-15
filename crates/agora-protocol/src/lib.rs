@@ -42,6 +42,9 @@ pub enum ErrorCode {
     RateLimited,
     /// Registration is closed or needs an invitation.
     RegistrationClosed,
+    /// The conversation's encryption moved on (a device joined or left) since the request was
+    /// prepared: process the new log entries, then encrypt again.
+    StaleEpoch,
     /// The server failed; the details are in its log.
     Internal,
 }
@@ -262,11 +265,26 @@ pub struct Message {
     /// The key the author's client sent with it, so the author can match its optimistic copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_nonce: Option<String>,
+    /// End-to-end encrypted: `body` is empty here and the text is in the conversation's
+    /// encrypted log, which only its devices can read. Messages from before encryption are not.
+    #[serde(default)]
+    pub encrypted: bool,
+    /// The log entry holding this message's current text (its creation or latest edit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_seq: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PostMessageRequest {
+    /// Always empty: the server refuses unencrypted messages.
+    #[serde(default)]
     pub body: String,
+    /// The MLS application message holding the text, base64.
+    #[serde(default)]
+    pub ciphertext: Option<String>,
+    /// The people the text mentions. The server cannot read the text, so the client says.
+    #[serde(default)]
+    pub mentions: Vec<UserId>,
     /// A unique key per message chosen by the client. Sending the same key again returns the
     /// message already stored instead of creating a second one.
     pub client_nonce: String,
@@ -276,7 +294,136 @@ pub struct PostMessageRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EditMessageRequest {
+    /// Always empty, as for a new message.
+    #[serde(default)]
     pub body: String,
+    #[serde(default)]
+    pub ciphertext: Option<String>,
+    #[serde(default)]
+    pub mentions: Vec<UserId>,
+}
+
+/// Messages by id, for showing results a client found in its own decrypted history.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LookupMessagesRequest {
+    pub ids: Vec<MessageId>,
+}
+
+// ---------------------------------------------------------------------------------------------
+// End-to-end encryption
+
+/// This session's device: its MLS signing key, base64. One per session.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegisterDeviceRequest {
+    pub public_key: String,
+}
+
+/// This session's device as the server sees it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeviceStatus {
+    /// Key packages left for others to add this device with. Publish more when it runs low.
+    pub key_packages: u32,
+}
+
+/// One-use key packages for this session's device, base64.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PublishKeyPackagesRequest {
+    pub key_packages: Vec<String>,
+}
+
+/// Claim one key package for each listed device (base64 signing keys) to add it to a
+/// conversation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClaimKeyPackagesRequest {
+    pub devices: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClaimedKeyPackage {
+    pub device: Device,
+    pub key_package: String,
+}
+
+/// A Welcome waiting for the caller's device: it was added at log entry `seq`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MlsWelcome {
+    pub seq: i64,
+    pub data: String,
+}
+
+/// A signed-in device of someone who can read a conversation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Device {
+    pub user_id: UserId,
+    /// Base64 MLS signing key.
+    pub public_key: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MlsKind {
+    /// Devices joined or left: the conversation moves to the next epoch.
+    Commit,
+    /// A message's text, new or edited.
+    Message,
+}
+
+/// One entry of a conversation's encrypted log.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MlsEntry {
+    pub seq: i64,
+    pub epoch: u64,
+    pub kind: MlsKind,
+    pub author_id: UserId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+    /// The MLS message, base64. Empty for a deleted message.
+    pub data: String,
+}
+
+/// A conversation's encryption state, and (with `after`) the log entries after a point.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MlsState {
+    pub channel_id: ChannelId,
+    /// `None` until the first device starts the group.
+    pub epoch: Option<u64>,
+    /// The latest GroupInfo (public: it lets a member's new device join), base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_info: Option<String>,
+    /// The newest entry in the log, 0 for none.
+    pub last_seq: i64,
+    /// Signed-in devices of everyone who may read the conversation now.
+    pub devices: Vec<Device>,
+    pub entries: Vec<MlsEntry>,
+    /// More entries follow the last one returned.
+    pub has_more: bool,
+    /// A Welcome for the caller's device, if someone added it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub welcome: Option<MlsWelcome>,
+}
+
+/// Start a conversation's group (first device only).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateGroupRequest {
+    pub group_info: String,
+}
+
+/// A commit for the current epoch and the GroupInfo of the epoch it leads to, both base64.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommitRequest {
+    pub commit: String,
+    pub group_info: String,
+    /// For a commit that adds devices: their Welcome, and the devices (signing keys) it is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub welcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub welcome_to: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommitResponse {
+    pub seq: i64,
+    pub epoch: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -356,6 +503,10 @@ pub enum ServerEvent {
     /// A channel was created, renamed, archived or gained members: refetch it.
     ChannelChanged {
         workspace_id: WorkspaceId,
+        channel_id: ChannelId,
+    },
+    /// A conversation's encrypted log has a new commit: devices joined or left.
+    MlsChanged {
         channel_id: ChannelId,
     },
     /// The caller can no longer see this channel.

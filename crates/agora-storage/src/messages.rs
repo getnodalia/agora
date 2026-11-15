@@ -11,7 +11,8 @@ use crate::{rows, Result, Store, StoreError};
 
 const MESSAGE_SELECT: &str = "
     SELECT m.id, m.channel_id, m.thread_root_id, m.body, m.client_nonce, m.created_at, m.edited_at,
-           m.deleted_at, m.reply_count, m.last_reply_at,
+           m.deleted_at, m.reply_count, m.last_reply_at, m.encrypted,
+           (SELECT MAX(l.seq) FROM mls_log l WHERE l.message_id = m.id) AS content_seq,
            u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name
     FROM messages m JOIN users u ON u.id = m.author_id";
 
@@ -37,6 +38,12 @@ fn message(r: &SqliteRow) -> Result<Message> {
         last_reply_at: r.try_get("last_reply_at")?,
         reactions: Vec::new(),
         client_nonce: Some(r.try_get("client_nonce")?),
+        encrypted: r.try_get("encrypted")?,
+        content_seq: if deleted {
+            None
+        } else {
+            r.try_get("content_seq")?
+        },
     })
 }
 
@@ -49,6 +56,9 @@ pub struct NewMessage<'a> {
     pub body: &'a str,
     pub nonce: &'a str,
     pub mentioned: &'a [UserId],
+    /// The encrypted text and the epoch it was encrypted in. The text goes to the conversation's
+    /// log, and `body` must then be empty.
+    pub ciphertext: Option<(&'a [u8], u64)>,
     pub now: Timestamp,
 }
 
@@ -81,9 +91,12 @@ impl Store {
                 .ok_or(StoreError::NotFound)?;
             return Ok(Inserted::Existing(message));
         }
+        if let Some((_, epoch)) = new.ciphertext {
+            crate::mls::check_epoch(&mut tx, new.channel, epoch).await?;
+        }
         let id: i64 = sqlx::query_scalar(
-            "INSERT INTO messages (channel_id, author_id, thread_root_id, body, client_nonce, created_at)
-             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO messages (channel_id, author_id, thread_root_id, body, client_nonce, created_at, encrypted)
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(new.channel.0)
         .bind(new.author.0)
@@ -91,9 +104,23 @@ impl Store {
         .bind(new.body)
         .bind(new.nonce)
         .bind(new.now)
+        .bind(new.ciphertext.is_some())
         .fetch_one(&mut *tx)
         .await
         .map_err(crate::conflict)?;
+        if let Some((data, epoch)) = new.ciphertext {
+            crate::mls::append(
+                &mut tx,
+                new.channel,
+                epoch,
+                "message",
+                new.author,
+                Some(MessageId(id)),
+                data,
+                new.now,
+            )
+            .await?;
+        }
         if let Some(root) = new.thread_root {
             sqlx::query(
                 "UPDATE messages SET reply_count = reply_count + 1, last_reply_at = ? WHERE id = ?",
@@ -216,21 +243,40 @@ impl Store {
         .transpose()
     }
 
+    /// Replace a message's text: `body` for a message from before encryption, or a new
+    /// encrypted text (appended to the log) for an encrypted one.
     pub async fn edit_message(
         &self,
         id: MessageId,
         body: &str,
+        ciphertext: Option<(&[u8], u64)>,
+        author: UserId,
         mentioned: &[UserId],
         now: Timestamp,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        let channel: i64 = sqlx::query_scalar("UPDATE messages SET body = ?, edited_at = ? WHERE id = ? AND deleted_at IS NULL RETURNING channel_id")
+        let channel: i64 = sqlx::query_scalar("UPDATE messages SET body = ?, edited_at = ?, encrypted = ? WHERE id = ? AND deleted_at IS NULL RETURNING channel_id")
             .bind(body)
             .bind(now)
+            .bind(ciphertext.is_some())
             .bind(id.0)
             .fetch_optional(&mut *tx)
             .await?
             .ok_or(StoreError::NotFound)?;
+        if let Some((data, epoch)) = ciphertext {
+            crate::mls::check_epoch(&mut tx, ChannelId(channel), epoch).await?;
+            crate::mls::append(
+                &mut tx,
+                ChannelId(channel),
+                epoch,
+                "message",
+                author,
+                Some(id),
+                data,
+                now,
+            )
+            .await?;
+        }
         sqlx::query("DELETE FROM mentions WHERE message_id = ?")
             .bind(id.0)
             .execute(&mut *tx)
@@ -273,6 +319,11 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM reactions WHERE message_id = ?")
+            .bind(id.0)
+            .execute(&mut *tx)
+            .await?;
+        // The ciphertext goes too. Its log entries stay, empty, so every device keeps its place.
+        sqlx::query("UPDATE mls_log SET data = x'' WHERE message_id = ?")
             .bind(id.0)
             .execute(&mut *tx)
             .await?;
@@ -401,6 +452,37 @@ impl Store {
             .bind(i64::from(limit))
             .fetch_all(&self.pool)
             .await?;
+        let mut messages = rows.iter().map(message).collect::<Result<Vec<_>>>()?;
+        self.attach_reactions(&mut messages).await?;
+        Ok(messages)
+    }
+
+    /// The messages with these ids in the channels of `workspace` that `user` may read (a
+    /// client's own search runs over its decrypted copies; this fills in the rest). Newest first.
+    pub async fn lookup_messages(
+        &self,
+        workspace: WorkspaceId,
+        user: UserId,
+        guest: bool,
+        ids: &[MessageId],
+    ) -> Result<Vec<Message>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut q: QueryBuilder<Sqlite> = QueryBuilder::new(MESSAGE_SELECT);
+        q.push(" JOIN channels c ON c.id = m.channel_id WHERE c.workspace_id = ");
+        q.push_bind(workspace.0);
+        q.push(" AND m.deleted_at IS NULL AND (EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = c.id AND cm.user_id = ");
+        q.push_bind(user.0);
+        q.push(") OR (c.kind = 'public' AND NOT ");
+        q.push_bind(guest);
+        q.push(")) AND m.id IN (");
+        let mut sep = q.separated(", ");
+        for id in ids {
+            sep.push_bind(id.0);
+        }
+        q.push(") ORDER BY m.id DESC");
+        let rows = q.build().fetch_all(&self.pool).await?;
         let mut messages = rows.iter().map(message).collect::<Result<Vec<_>>>()?;
         self.attach_reactions(&mut messages).await?;
         Ok(messages)

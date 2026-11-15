@@ -36,5 +36,6 @@ writes_per_minute = 120
 reads_per_minute = 1200
 # Open WebSocket connections per account.
 connections_per_user = 16
-# Largest request body, in bytes.
-max_body_bytes = 65536
+# Largest request body, in bytes. An encrypted conversation's GroupInfo grows with its devices
+# (about 300 bytes each), so this also bounds how many devices one conversation can hold.
+max_body_bytes = 1048576

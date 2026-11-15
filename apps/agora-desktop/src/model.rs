@@ -113,6 +113,8 @@ pub struct Model {
     /// Whether the window has focus: messages arriving in the open channel only count as read
     /// when someone can see them.
     pub focused: bool,
+    /// The devices that can read each conversation, as this device's encryption group sees them.
+    pub devices: HashMap<ChannelId, Vec<agora_e2e::Leaf>>,
 }
 
 impl Model {
@@ -131,6 +133,7 @@ impl Model {
             typing: Vec::new(),
             connection: Connection::Connecting,
             focused: true,
+            devices: HashMap::new(),
         }
     }
 
@@ -464,7 +467,11 @@ impl Model {
                     }
                 }
             }
-            ServerEvent::Ready { .. } | ServerEvent::Error { .. } | ServerEvent::Pong => {}
+            // The network side already caught the conversation's encryption up.
+            ServerEvent::MlsChanged { .. }
+            | ServerEvent::Ready { .. }
+            | ServerEvent::Error { .. }
+            | ServerEvent::Pong => {}
         }
         effects
     }
@@ -596,6 +603,8 @@ mod tests {
             last_reply_at: None,
             reactions: Vec::new(),
             client_nonce: None,
+            encrypted: false,
+            content_seq: None,
         }
     }
 

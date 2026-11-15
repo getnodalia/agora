@@ -7,8 +7,10 @@ in the [Nodalia Design Language](https://github.com/getnodalia/nodalia-design).
 
 > **Status: early, first working version (0.1.0-dev).** Everything listed under "What works" is
 > implemented and tested against a real server. Nothing has been released yet, and the protocol
-> may still change before 1.0. There is **no end-to-end encryption**: the server can read every
-> message, as in Slack, Teams or Discord. Use TLS for any server outside your own computer.
+> may still change before 1.0. Messages are **end-to-end encrypted** with MLS (RFC 9420): the
+> server stores only ciphertext. It still sees who talks to whom and when; read
+> [docs/security.md](docs/security.md) for what it protects and what it does not. Use TLS for
+> any server outside your own computer.
 
 ![Two Ágora clients side by side: a message, a reaction and a thread arrive in real time](docs/screenshots/two-clients.png)
 
@@ -23,22 +25,30 @@ in the [Nodalia Design Language](https://github.com/getnodalia/nodalia-design).
 - **Messages**: sent once even when the client retries (idempotent with a client nonce), edited,
   deleted, with reactions, `@mentions`, threads, and a small Markdown subset (bold, italic,
   strike, code, code blocks, quotes, links). Nothing is ever rendered as HTML.
+- **End-to-end encryption** of every channel and direct message with MLS (RFC 9420, through
+  OpenMLS): the server keeps only ciphertext. Each device has its own keys and reads from when it
+  was added; the details panel lists the devices that can read a conversation with their
+  fingerprints.
 - **Real time** over an authenticated WebSocket: new messages, edits, reactions, typing, presence,
   read markers across your devices; the client reconnects with backoff and catches up.
 - **Unread counts and mentions** per channel and workspace, with a "New messages" line.
-- **Search** in the messages you can read.
+- **Search** in the messages you can read, on your own device.
 - **Desktop app**: three panes (workspaces and channels, the conversation, a details/thread/search
   panel), light, dark and high-contrast themes, reduced motion, keyboard shortcuts, Spanish and
   English, NDL window controls on Linux and native ones on macOS and Windows.
 
 ![The light theme](docs/screenshots/light.png)
 
+![Two clients in an end-to-end encrypted channel; the details panel lists the devices that can read it with their fingerprints](docs/screenshots/encrypted.png)
+
+![A laptop signed in later: what was said before it joined stays encrypted, what follows it reads](docs/screenshots/new-device.png)
+
 Not yet: file uploads, voice and video, notifications from the operating system, a web client,
-mobile apps, PostgreSQL, federation, end-to-end encryption, installers. See [ROADMAP.md](ROADMAP.md).
+mobile apps, PostgreSQL, federation, verified device identities, installers. See [ROADMAP.md](ROADMAP.md).
 
 ## Run it
 
-You need Rust 1.85 or newer. On Linux the desktop app also needs the usual windowing libraries
+You need Rust 1.91 or newer. On Linux the desktop app also needs the usual windowing libraries
 (Debian/Ubuntu: `sudo apt install libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev libfontconfig1-dev`).
 
 ```sh
