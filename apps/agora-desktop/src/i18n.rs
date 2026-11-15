@@ -16,15 +16,11 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// The system language when it is Spanish, English otherwise.
+    /// The system language when it is Spanish, English otherwise. macOS and Windows keep the
+    /// language in their own settings (an app opened from the Dock has no `LANG`), so ask them;
+    /// Linux and the BSDs say it in the environment.
     pub fn system() -> Lang {
-        let vars = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
-        let spanish = vars
-            .iter()
-            .filter_map(|v| std::env::var(v).ok())
-            .find(|v| !v.is_empty())
-            .is_some_and(|v| v.starts_with("es"));
-        if spanish {
+        if system_tag().is_some_and(|tag| is_spanish(&tag)) {
             Lang::Es
         } else {
             Lang::En
@@ -37,6 +33,25 @@ impl Lang {
             Lang::En => "English",
         }
     }
+}
+
+fn system_tag() -> Option<String> {
+    let platform = || sys_locale::get_locale().filter(|tag| !tag.is_empty() && tag.len() <= 64);
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
+        return platform();
+    }
+    ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty())
+        .or_else(platform)
+}
+
+/// Whether a locale tag (`es`, `es-ES`, `es_MX.UTF-8`, `es-419`) names Spanish.
+fn is_spanish(tag: &str) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    tag.strip_prefix("es")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_', '.', '@']))
 }
 
 static CURRENT: AtomicU8 = AtomicU8::new(0);
@@ -232,6 +247,16 @@ const SPANISH: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spanish_locale_tags_are_recognised() {
+        for tag in ["es", "es-ES", "es_ES.UTF-8", "es-419", "ES_mx", "es@euro"] {
+            assert!(is_spanish(tag), "{tag}");
+        }
+        for tag in ["en-US", "en_GB.UTF-8", "et-EE", "", "C", "POSIX", "est"] {
+            assert!(!is_spanish(tag), "{tag}");
+        }
+    }
 
     #[test]
     fn the_table_is_sorted_without_duplicates() {

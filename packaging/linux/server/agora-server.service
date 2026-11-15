@@ -1,0 +1,23 @@
+[Unit]
+Description=Ágora chat server
+Documentation=https://github.com/getnodalia/agora/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agora
+Group=agora
+WorkingDirectory=/var/lib/agora
+ExecStart=/usr/bin/agora-server --config /etc/agora/agora.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/agora
+
+[Install]
+WantedBy=multi-user.target

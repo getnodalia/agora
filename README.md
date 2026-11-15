@@ -100,14 +100,28 @@ on [getnodalia.com/agora](https://getnodalia.com/agora):
 
 | System | Files |
 |---|---|
-| Linux | `agora-<version>-linux-x86_64.AppImage` (the app), `.deb` and `.rpm` (the app and `agora-server`), `.tar.gz` (both, in `bin/`) |
+| Linux, the app | `agora-<version>-linux-x86_64.AppImage`, `.deb`, `.rpm` or `.tar.gz` |
+| Linux, the server | `agora-server-<version>-linux-x86_64.tar.gz` with `install.sh`, or the `agora-server` `.deb` and `.rpm`: the server alone, with its systemd service |
 | macOS 11+, Apple Silicon and Intel | `agora-<version>-macos-universal.dmg` (the app), `agora-server-<version>-macos-universal.zip` |
 | Windows 10/11 x64 | `agora-<version>-windows-x64.zip`: `agora.exe` and `agora-server.exe`, portable |
 
 The macOS app is signed ad hoc, not with an Apple Developer ID: open it the first time with
 right-click > Open. Windows SmartScreen warns the first time the files run ("More info" > "Run
 anyway"). Checksums are in `SHA256SUMS`, `SHA256SUMS-macos` and `SHA256SUMS-windows`.
-[docs/deployment.md](docs/deployment.md) sets up a server.
+
+### A server on your own machine
+
+On any Linux with systemd (a Debian or Ubuntu server, a Proxmox container, a small VPS):
+
+```sh
+curl -LO https://github.com/getnodalia/agora/releases/latest/download/agora-server-linux-x86_64.tar.gz
+tar xzf agora-server-linux-x86_64.tar.gz && cd agora-server-*-linux-x86_64/
+sudo ./install.sh
+```
+
+It installs the server as the `agora-server` service, listening on `127.0.0.1:7878`. Put a
+reverse proxy with TLS in front of it and use its address in the app.
+[docs/deployment.md](docs/deployment.md) covers the proxy, Proxmox, backups and upgrades.
 
 ## Build it
 

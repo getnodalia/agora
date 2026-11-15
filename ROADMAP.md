@@ -16,12 +16,13 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
   channels, retries, invalid sessions).
 - Packages for every release, built and started on clean systems by CI: AppImage, .deb, .rpm and
   a tarball for Linux, a universal DMG and a server zip for macOS, a portable zip for Windows.
-  Merging a version bump with its notes releases it.
+  The Linux server ships on its own too (tarball with `install.sh`, `.deb`, `.rpm`), with a systemd
+  service, its user and its configuration. Merging a version bump with its notes releases it.
 
 ## Next: usable by a small team
 
 - A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
-- A systemd unit and a container image for the server.
+- A container image for the server, and server packages for ARM (Raspberry Pi).
 - Notifications from the operating system, and the unread count on the app icon.
 - Files and images, with size limits and stored outside the database.
 - Account settings: change password and display name, sign out other sessions, delete account.

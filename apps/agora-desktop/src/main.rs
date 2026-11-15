@@ -51,12 +51,14 @@ fn main() -> ExitCode {
     let settings = settings::Settings::load(settings::dir().as_deref());
     let ndl_controls = chrome::NDL_CONTROLS_POSSIBLE
         && settings.window_controls == settings::WindowControls::Nodalia;
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Ágora")
-        .with_app_id("dev.danielmiguelt.Agora")
-        .with_inner_size([1180.0, 760.0])
-        .with_min_inner_size([760.0, 480.0])
-        .with_decorations(!ndl_controls);
+    let mut viewport = chrome::frame(
+        egui::ViewportBuilder::default()
+            .with_title("Ágora")
+            .with_app_id("dev.danielmiguelt.Agora")
+            .with_inner_size([1180.0, 760.0])
+            .with_min_inner_size([760.0, 480.0]),
+        ndl_controls,
+    );
     if let Some(icon) = icon::window_icon() {
         viewport = viewport.with_icon(icon);
     }

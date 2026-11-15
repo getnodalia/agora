@@ -1,6 +1,8 @@
 //! The window frame when Ágora draws its own (Linux, unless the person picked the system's):
 //! the empty part of the top bar moves the window, a double click maximizes it, the edges
-//! resize it, and the NDL controls sit on the right. macOS and Windows keep native frames.
+//! resize it, and the NDL controls sit on the right. Windows keeps its native frame. macOS keeps
+//! its native traffic lights, but inside the window: the content runs under a transparent title
+//! bar, the top bar leaves room for the lights on its left, and its empty part moves the window.
 
 use egui::{pos2, CursorIcon, PointerButton, Rect, ResizeDirection, Sense, Ui, ViewportCommand};
 use nodalia_theme::{space, window_controls, Mode, Palette};
@@ -9,6 +11,41 @@ use crate::i18n::tr;
 
 /// Whether this platform may draw NDL window controls at all.
 pub const NDL_CONTROLS_POSSIBLE: bool = cfg!(target_os = "linux");
+
+/// Whether the window's content runs under a transparent title bar (macOS).
+pub const INSET_TITLE_BAR: bool = cfg!(target_os = "macos");
+
+/// Room the macOS traffic lights take at the left of the top bar.
+pub const TRAFFIC_LIGHTS_WIDTH: f32 = 72.0;
+
+/// The native frame's options for this platform: on macOS the content fills the window and the
+/// traffic lights float over the top bar, as in the other Nodalia apps.
+pub fn frame(viewport: egui::ViewportBuilder, ndl_controls: bool) -> egui::ViewportBuilder {
+    if INSET_TITLE_BAR {
+        viewport
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+            .with_titlebar_buttons_shown(true)
+    } else {
+        viewport.with_decorations(!ndl_controls)
+    }
+}
+
+/// Space to leave at the left of the top bar before its first widget.
+pub fn leading_inset() -> f32 {
+    if INSET_TITLE_BAR {
+        TRAFFIC_LIGHTS_WIDTH
+    } else {
+        0.0
+    }
+}
+
+/// Whether Ágora moves the window from the top bar itself (it draws the frame, or the native
+/// title bar is hidden behind the content).
+pub fn drags_window(ndl_controls: bool) -> bool {
+    ndl_controls || INSET_TITLE_BAR
+}
 
 /// Width the controls take at the right of the bar, margin included.
 pub const CONTROLS_WIDTH: f32 = window_controls::WIDTH + space::SM;
@@ -106,6 +143,30 @@ fn bands(full: Rect) -> [(ResizeDirection, CursorIcon, Rect); 8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_frame_fits_the_platform() {
+        let viewport = frame(egui::ViewportBuilder::default(), false);
+        if cfg!(target_os = "macos") {
+            assert_eq!(viewport.fullsize_content_view, Some(true));
+            assert_eq!(viewport.titlebar_shown, Some(false));
+            assert_ne!(
+                viewport.titlebar_buttons_shown,
+                Some(false),
+                "keep the traffic lights"
+            );
+            assert!(leading_inset() > 0.0 && drags_window(false));
+        } else {
+            assert_eq!(viewport.fullsize_content_view, None, "a native frame");
+            assert_eq!(viewport.decorations, Some(true));
+            assert_eq!(leading_inset(), 0.0);
+            assert!(!drags_window(false));
+        }
+        let own = frame(egui::ViewportBuilder::default(), true);
+        if !cfg!(target_os = "macos") {
+            assert_eq!(own.decorations, Some(false));
+        }
+    }
 
     #[test]
     fn controls_map_to_viewport_commands() {
