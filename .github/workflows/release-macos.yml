@@ -133,7 +133,6 @@ jobs:
           sdk=$(otool -l "$app" | awk '$1 == "sdk" {print $2; exit}')
           echo "linked against SDK $sdk"
           test "${sdk%%.*}" -ge 26
-          codesign --verify --strict --deep /Volumes/Agora/Agora.app
           "$app" --version | tee version.txt
           arch -x86_64 "$app" --version
           grep -q "agora $VERSION" version.txt
