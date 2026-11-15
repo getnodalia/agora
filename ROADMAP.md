@@ -2,7 +2,7 @@
 
 Where Ágora is and what comes next. Only what is under "Done" exists; everything else is a plan.
 
-## Done: first working version (0.1.0-dev)
+## Done: first release (0.1.0)
 
 - Server: accounts, sessions, workspaces with roles and invitations, public and private channels,
   direct messages, threads, reactions, mentions, edits and deletions, unread markers, search,
@@ -14,10 +14,14 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
   with fingerprints. Tests against a real server check that no text reaches the database.
 - End-to-end tests of the MVP against a real server (two people, restarts, isolation, private
   channels, retries, invalid sessions).
+- Packages for every release, built and started on clean systems by CI: AppImage, .deb, .rpm and
+  a tarball for Linux, a universal DMG and a server zip for macOS, a portable zip for Windows.
+  Merging a version bump with its notes releases it.
 
 ## Next: usable by a small team
 
-- First release with packages (AppImage, .deb, .rpm, DMG, Windows) and release notes.
+- A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
+- A systemd unit and a container image for the server.
 - Notifications from the operating system, and the unread count on the app icon.
 - Files and images, with size limits and stored outside the database.
 - Account settings: change password and display name, sign out other sessions, delete account.

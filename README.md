@@ -5,9 +5,8 @@ messages, threads, reactions, mentions, unread markers and search, on your own s
 is one Rust binary with a SQLite file. The desktop client is native (egui, no web view) and drawn
 in the [Nodalia Design Language](https://github.com/getnodalia/nodalia-design).
 
-> **Status: early, first working version (0.1.0-dev).** Everything listed under "What works" is
-> implemented and tested against a real server. Nothing has been released yet, and the protocol
-> may still change before 1.0. Messages are **end-to-end encrypted** with MLS (RFC 9420): the
+> **Status: early, first release (0.1.0).** Everything listed under "What works" is implemented
+> and tested against a real server, and the protocol may still change before 1.0. Messages are **end-to-end encrypted** with MLS (RFC 9420): the
 > server stores only ciphertext. It still sees who talks to whom and when; read
 > [docs/security.md](docs/security.md) for what it protects and what it does not. Use TLS for
 > any server outside your own computer.
@@ -44,9 +43,24 @@ in the [Nodalia Design Language](https://github.com/getnodalia/nodalia-design).
 ![A laptop signed in later: what was said before it joined stays encrypted, what follows it reads](docs/screenshots/new-device.png)
 
 Not yet: file uploads, voice and video, notifications from the operating system, a web client,
-mobile apps, PostgreSQL, federation, verified device identities, installers. See [ROADMAP.md](ROADMAP.md).
+mobile apps, PostgreSQL, federation, verified device identities. See [ROADMAP.md](ROADMAP.md).
 
-## Run it
+## Download
+
+Every release on the [releases page](https://github.com/getnodalia/agora/releases/latest) has:
+
+| System | Files |
+|---|---|
+| Linux | `agora-<version>-linux-x86_64.AppImage` (the app), `.deb` and `.rpm` (the app and `agora-server`), `.tar.gz` (both, in `bin/`) |
+| macOS 11+, Apple Silicon and Intel | `agora-<version>-macos-universal.dmg` (the app), `agora-server-<version>-macos-universal.zip` |
+| Windows 10/11 x64 | `agora-<version>-windows-x64.zip`: `agora.exe` and `agora-server.exe`, portable |
+
+The macOS app is signed ad hoc, not with an Apple Developer ID: open it the first time with
+right-click > Open. Windows SmartScreen warns the first time the files run ("More info" > "Run
+anyway"). Checksums are in `SHA256SUMS`, `SHA256SUMS-macos` and `SHA256SUMS-windows`.
+[docs/deployment.md](docs/deployment.md) sets up a server.
+
+## Build it
 
 You need Rust 1.91 or newer. On Linux the desktop app also needs the usual windowing libraries
 (Debian/Ubuntu: `sudo apt install libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev libfontconfig1-dev`).

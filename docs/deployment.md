@@ -3,7 +3,11 @@
 Ágora's server is one binary and one SQLite file. Run it on loopback and let a reverse proxy
 handle TLS. Nothing in Ágora talks to an outside service.
 
-## Build
+## Install
+
+The `.deb` and `.rpm` packages install `/usr/bin/agora-server`, and the Linux tarball and the macOS
+and Windows zips carry it too ([releases](https://github.com/getnodalia/agora/releases/latest)).
+Or build it:
 
 ```sh
 cargo build --release -p agora-server
