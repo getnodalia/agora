@@ -1,0 +1,97 @@
+# Ágora: instructions for agents
+
+Engineering rules for every Nodalia repository: [getnodalia/foundation](https://github.com/getnodalia/foundation)
+([engineering](https://github.com/getnodalia/foundation/blob/main/standards/engineering.md),
+[CI](https://github.com/getnodalia/foundation/blob/main/standards/ci.md),
+[security](https://github.com/getnodalia/foundation/blob/main/standards/security.md),
+[dependencies and licences](https://github.com/getnodalia/foundation/blob/main/standards/dependencies.md),
+[release](https://github.com/getnodalia/foundation/blob/main/standards/release.md),
+[NDL](https://github.com/getnodalia/foundation/blob/main/standards/ndl.md)).
+
+## What this is
+
+Ágora is Nodalia's self-hosted, open-source team chat: workspaces, channels, direct messages,
+threads and reactions on a server you run yourself. The server is one Rust binary with a SQLite
+file. The desktop client is native egui with `nodalia-theme`, for Linux, macOS and Windows. It is
+not built on Electron, Chromium or a web view. The product name is **Ágora** in prose and in the
+interface. Machine names are `agora`. The app ID is `dev.danielmiguelt.Agora`, the accent is
+`#0F7C80`, and the licence is `MIT OR Apache-2.0`. Read `README.md` for the user-facing picture,
+`docs/` for the details and `ROADMAP.md` for what does not exist yet.
+
+## Architecture
+
+| Path | Responsibility |
+|---|---|
+| `crates/agora-core` | Ids, roles and permissions, limits, validation, the message text format. No I/O |
+| `crates/agora-protocol` | The wire contract: HTTP bodies under `/api/v1`, WebSocket frames and events |
+| `crates/agora-storage` | SQLite through SQLx, migrations in `migrations/`. All SQL lives here |
+| `crates/agora-client` | HTTP calls and the reconnecting real-time connection, for every client |
+| `apps/agora-server` | Axum routes, authentication, the event hub, limits, configuration |
+| `apps/agora-desktop` | The egui app: `model.rs` (state and reducer), `net.rs` (requests off the UI thread), `view.rs`, `dialogs.rs`, `signin.rs`, `widgets.rs`, `i18n.rs` |
+
+Dependencies point down: core ← protocol ← storage/client ← apps. The protocol changes only
+additively within `/api/v1`. A breaking change gets `/api/v2`. A new database column is a new
+migration and never an edit to an old one. The desktop app never blocks its window thread: every
+request runs on its Tokio runtime and comes back as a `net::Reply`.
+
+## Build and test
+
+```bash
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked   # the CI gate
+cargo test -p agora-server --test mvp        # end-to-end tests against a real server
+cargo run -p agora-server                    # http://127.0.0.1:7878, ./agora.db
+AGORA_DESKTOP_DIR=/tmp/a cargo run -p agora-desktop   # one client per folder
+```
+
+Two clients on one computer each get their own `AGORA_DESKTOP_DIR`. To look at the UI with no
+display, run it under `Xvfb` and drive it with `xdotool`. Linux needs `libxkbcommon-x11-0` and
+`libegl1` at run time.
+
+## Rules
+
+- **Never crash.** Non-test code has no `unwrap`/`expect`/`panic!` (workspace clippy lints, `-D warnings`).
+  Everything a client sends is hostile: validate it with `agora_core::validate` and limits.
+- **Authorise every read and write**, including real-time events, through `agora_core::roles` and the
+  membership checks in `apps/agora-server/src/routes/mod.rs`. Something you cannot see answers 404.
+  Every new route gets a test that a non-member is refused.
+- **No secrets in logs**: never log passwords, tokens, invitation codes or message text.
+- **No home-made cryptography**, and never describe Ágora as end-to-end encrypted. It is not
+  (`docs/security.md`).
+- **SQL only through SQLx with bound parameters**, and only in `agora-storage`.
+- **No mandatory external services.** The server runs offline. Builds and CI use free GitHub
+  runners only.
+- **UI strings** go through `i18n::tr`/`trf`, with their Spanish in the sorted `SPANISH` table
+  (tests enforce both). Colours come from the NDL palette and never from a literal.
+- **Assets** get a row in `ATTRIBUTION.md` in the same change.
+- Planned features are never described as existing: README, ROADMAP and release notes say only
+  what runs.
+
+## NDL
+
+`nodalia-theme` comes from getnodalia/nodalia-design, pinned by `rev` with the `egui` and
+`creator` features. It supplies the palette (`Accent::Agora`), islands, buttons, fields, window
+controls and icons. Never copy NDL into this repository. A missing component goes to
+nodalia-design through its own pull request first. NDL window controls are drawn on Linux only
+(unless the person picks the system's own in Preferences). macOS and Windows keep native
+controls. The hamburger menu holds Preferences, Keyboard shortcuts, About and Log out, and the
+theme choice lives only in Preferences. What is still missing is in `NODALIA_MIGRATION.md`.
+
+## Release
+
+Nothing is released yet. Releases will follow Foundation's automatic flow: a pull request that
+bumps `[workspace.package] version` and adds `docs/release-notes/vX.Y.Z.md`, merged, is tagged
+and published by workflows. Nobody pushes tags. Until that flow is set up and validated here, do
+not publish anything.
+
+## Pull requests
+
+A change is ready when the gate passes, new behaviour has a test that fails without it, UI changes
+come with a screenshot taken from the running app, and docs that describe the behaviour are
+updated. `main` changes only through pull requests.
+
+## Known traps
+
+- egui 0.37: `TextEdit::align(Align2::LEFT_CENTER)` centres a field's text. Without it, NDL's tall
+  interact size puts the text at the top.
+- xdotool types some capital accented letters in lower case. Check text typed that way in the
+  database before reporting a bug.

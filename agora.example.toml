@@ -1,0 +1,40 @@
+# Ágora server settings. Copy to agora.toml and start with: agora-server --config agora.toml
+# Every key is optional; these are the defaults. AGORA_BIND, AGORA_DATABASE,
+# AGORA_REGISTRATION and AGORA_TRUST_PROXY override the file.
+
+# Shown to clients on the sign-in screen.
+name = "Ágora"
+
+# Address and port. Keep it on loopback and put a TLS reverse proxy in front
+# (docs/deployment.md). The server refuses a public address unless trust_proxy
+# or allow_insecure_public_bind is set.
+bind = "127.0.0.1:7878"
+
+# SQLite database (created if missing).
+database = "sqlite://agora.db"
+
+# Who may create an account: "open", "invite_only" or "closed".
+# The first account on a server can always register.
+registration = "open"
+
+# Days a session lasts after signing in.
+session_days = 30
+
+# Behind a reverse proxy that terminates TLS and sets X-Forwarded-For.
+trust_proxy = false
+
+# Listen on a public address without TLS. Passwords would travel in clear text:
+# only for an isolated lab network.
+allow_insecure_public_bind = false
+
+[limits]
+# Sign-in and registration attempts per minute and address.
+auth_per_minute = 10
+# Writes (messages, reactions, edits...) per minute and account.
+writes_per_minute = 120
+# Reads per minute and account.
+reads_per_minute = 1200
+# Open WebSocket connections per account.
+connections_per_user = 16
+# Largest request body, in bytes.
+max_body_bytes = 65536

@@ -1,0 +1,50 @@
+# Protocol (API v1)
+
+JSON over HTTP under `/api/v1`, and a WebSocket at `/api/v1/ws`. The types are in
+`crates/agora-protocol`; fields are only ever added (with defaults) within a version.
+
+Authenticated requests carry `Authorization: Bearer <token>`. Errors are
+`{"code": "...", "message": "...", "field": "..."}` with `code` one of `invalid`,
+`unauthenticated`, `forbidden`, `not_found`, `conflict`, `rate_limited`, `registration_closed`,
+`internal`. A channel the caller may not read answers `404`, not `403`, so ids reveal nothing.
+
+## Endpoints
+
+| Method and path | What |
+|---|---|
+| `GET /server` | Name, version, API version, registration policy (no auth) |
+| `POST /auth/register` | `{username, display_name, password, invite_code?}` → session |
+| `POST /auth/login` | `{username, password}` → `{token, expires_at, user}` |
+| `POST /auth/logout` | Ends this session and closes its sockets |
+| `GET /me`, `PATCH /me` | The signed-in user; change the display name |
+| `GET /workspaces`, `POST /workspaces` | Workspaces the caller belongs to; create one (with `#general`) |
+| `POST /workspaces/join` | `{code}`: redeem an invitation |
+| `GET /workspaces/{id}` | One workspace |
+| `GET /workspaces/{id}/members` | Members, with whether they are online |
+| `POST /workspaces/{id}/invites` | `{max_uses?, expires_in_hours?, role?}` → the code, shown once (admins) |
+| `GET /workspaces/{id}/channels`, `POST …` | Channels the caller can see, with unread and mention counts; create one |
+| `POST /workspaces/{id}/direct` | `{user_id}`: open (or find) the direct conversation |
+| `GET /workspaces/{id}/search?q=` | Messages matching `q` in channels the caller can read |
+| `GET /channels/{id}`, `PATCH …` | One channel; rename, set the topic, archive |
+| `POST /channels/{id}/join`, `/leave` | Join a public channel; leave a channel |
+| `POST /channels/{id}/members` | `{user_id}`: add someone to a private channel |
+| `POST /channels/{id}/read` | `{message_id}`: move the read marker |
+| `GET /channels/{id}/messages?before=&after=&limit=` | History, oldest first, top-level messages only |
+| `POST /channels/{id}/messages` | `{body, client_nonce, thread_root_id?}`; a repeated nonce returns the stored message |
+| `PATCH /messages/{id}`, `DELETE …` | Edit (author) or delete (author or moderator) |
+| `GET /messages/{id}/thread` | A root message and its replies |
+| `POST /messages/{id}/reactions` | `{emoji}`: toggle the caller's reaction |
+
+`GET /healthz` (outside the prefix) answers `ok` for load balancers.
+
+## WebSocket
+
+Client frames: `auth {token}` (first, within 10 s), `typing {channel_id, thread_root_id?}`, `ping`.
+
+Server events: `ready {user}`, `error {code, message}`, `message_created`, `message_updated`,
+`message_deleted`, `reactions_changed`, `channel_changed`, `channel_removed`, `member_joined`,
+`read_marker`, `typing`, `presence`, `pong`.
+
+Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
+restart (retry with backoff). After reconnecting, a client fetches history `after` the last
+message it has, which is how nothing is lost while it was away.

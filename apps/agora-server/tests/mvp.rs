@@ -1,0 +1,607 @@
+//! The MVP's promises, checked end to end: a real server on a local port, real HTTP clients and
+//! real WebSockets, the same `agora-client` code the desktop app uses.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+mod common;
+
+use std::time::Duration;
+
+use agora_client::{new_nonce, ClientError, RealtimeEvent};
+use agora_protocol::{
+    CreateChannelRequest, CreateInviteRequest, ErrorCode, PostMessageRequest, ServerEvent,
+};
+use common::*;
+
+fn post(body: &str) -> PostMessageRequest {
+    PostMessageRequest {
+        body: body.into(),
+        client_nonce: new_nonce(),
+        thread_root_id: None,
+    }
+}
+
+/// Ana creates a workspace and invites Luis; both end up in #general.
+async fn ana_and_luis(
+    server: &Server,
+) -> (
+    agora_client::Client,
+    agora_client::Client,
+    agora_protocol::Workspace,
+    agora_protocol::Channel,
+) {
+    let (ana, _) = register(server, "ana").await;
+    let ws = ana.create_workspace("Laboratorio").await.unwrap();
+    let invite = ana
+        .create_invite(
+            ws.id,
+            &CreateInviteRequest {
+                max_uses: Some(5),
+                expires_in_hours: None,
+                role: None,
+            },
+        )
+        .await
+        .unwrap();
+    let (luis, _) = register(server, "luis").await;
+    luis.join_workspace(&invite.code).await.unwrap();
+    let general = ana
+        .channels(ws.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    (ana, luis, ws, general)
+}
+
+#[tokio::test]
+async fn two_users_exchange_messages_in_real_time() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, luis, _ws, general) = ana_and_luis(&server).await;
+    let mut ana_live = Live::open(&ana);
+    let mut luis_live = Live::open(&luis);
+    ana_live.ready().await;
+    luis_live.ready().await;
+
+    let sent = ana
+        .post_message(general.id, &post("¿Probamos el banco de ensayo? 🔧"))
+        .await
+        .unwrap();
+    let got = luis_live
+        .server_event(|e| match e {
+            ServerEvent::MessageCreated { message } => Some(message.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(got.id, sent.id);
+    assert_eq!(got.body, "¿Probamos el banco de ensayo? 🔧");
+    assert_eq!(got.author.username, "ana");
+
+    // Luis sees Ana's message as unread until he reads it.
+    let unread = luis.channel(general.id).await.unwrap();
+    assert_eq!(unread.unread, 1);
+    luis.mark_read(general.id, sent.id).await.unwrap();
+    assert_eq!(luis.channel(general.id).await.unwrap().unread, 0);
+
+    luis.post_message(general.id, &post("Sí, a las **17:00**"))
+        .await
+        .unwrap();
+    let reply = ana_live
+        .server_event(|e| match e {
+            ServerEvent::MessageCreated { message } if message.author.username == "luis" => {
+                Some(message.body.clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(reply, "Sí, a las **17:00**");
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn messages_survive_a_server_restart() {
+    let (dir, db) = temp_db("restart");
+    let server = Server::start(&db).await;
+    let (ana, luis, _ws, general) = ana_and_luis(&server).await;
+    let first = ana
+        .post_message(general.id, &post("antes del reinicio"))
+        .await
+        .unwrap();
+    let root = luis.post_message(general.id, &post("hilo")).await.unwrap();
+    ana.post_message(
+        general.id,
+        &PostMessageRequest {
+            thread_root_id: Some(root.id),
+            ..post("respuesta")
+        },
+    )
+    .await
+    .unwrap();
+    let port = server.port();
+    let ana_token = ana.token().unwrap().to_owned();
+    server.stop().await;
+
+    // A new process on the same file: the session and the history are still there.
+    let server = Server::start_with(
+        agora_server::Config {
+            database: db.clone(),
+            ..Default::default()
+        },
+        port,
+    )
+    .await;
+    let ana = server.anonymous().with_token(ana_token);
+    let page = ana.history(general.id, None, None, None).await.unwrap();
+    let bodies: Vec<_> = page.messages.iter().map(|m| m.body.as_str()).collect();
+    assert_eq!(bodies, ["antes del reinicio", "hilo"]);
+    assert_eq!(page.messages[0].id, first.id);
+    assert_eq!(page.messages[1].reply_count, 1);
+    assert_eq!(
+        ana.thread(root.id).await.unwrap().replies[0].body,
+        "respuesta"
+    );
+    server.stop().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn private_channels_are_invisible_to_non_members() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, luis, ws, _general) = ana_and_luis(&server).await;
+    let mut luis_live = Live::open(&luis);
+    luis_live.ready().await;
+
+    let secret = ana
+        .create_channel(
+            ws.id,
+            &CreateChannelRequest {
+                name: "dirección".into(),
+                topic: String::new(),
+                private: true,
+            },
+        )
+        .await
+        .unwrap();
+    let msg = ana
+        .post_message(secret.id, &post("presupuesto confidencial"))
+        .await
+        .unwrap();
+
+    // Not listed, not readable, not writable, not searchable, no thread, no reactions, no events.
+    assert!(luis
+        .channels(ws.id)
+        .await
+        .unwrap()
+        .iter()
+        .all(|c| c.id != secret.id));
+    for err in [
+        luis.history(secret.id, None, None, None).await.err(),
+        luis.channel(secret.id).await.err(),
+        luis.post_message(secret.id, &post("hola")).await.err(),
+        luis.join_channel(secret.id).await.err(),
+        luis.thread(msg.id).await.err(),
+        luis.react(msg.id, "👀").await.err(),
+        luis.edit_message(msg.id, "x").await.err(),
+        luis.delete_message(msg.id).await.err(),
+        luis.mark_read(secret.id, msg.id).await.err(),
+    ] {
+        assert_eq!(err.and_then(|e| e.code()), Some(ErrorCode::NotFound));
+    }
+    assert!(luis
+        .search(ws.id, "confidencial")
+        .await
+        .unwrap()
+        .messages
+        .is_empty());
+    luis_live
+        .assert_none(Duration::from_millis(300), |e| matches!(e, ServerEvent::MessageCreated { message } if message.channel_id == secret.id))
+        .await;
+
+    // Once added, Luis reads it.
+    ana.add_channel_member(secret.id, luis.me().await.unwrap().id)
+        .await
+        .unwrap();
+    assert_eq!(
+        luis.history(secret.id, None, None, None)
+            .await
+            .unwrap()
+            .messages
+            .len(),
+        1
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn workspaces_are_isolated_from_each_other() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, _luis, ws_a, general_a) = ana_and_luis(&server).await;
+    let (eva, eva_user) = register(&server, "eva").await;
+    let ws_b = eva.create_workspace("Otra empresa").await.unwrap();
+    let general_b = eva.channels(ws_b.id).await.unwrap()[0].clone();
+    let msg_b = eva
+        .post_message(general_b.id, &post("solo para la empresa B"))
+        .await
+        .unwrap();
+    let ana_user = ana.me().await.unwrap();
+
+    // Ana (workspace A) cannot see anything of workspace B, nor Eva anything of A.
+    for err in [
+        ana.channels(ws_b.id).await.err(),
+        ana.members(ws_b.id).await.err(),
+        ana.history(general_b.id, None, None, None).await.err(),
+        ana.post_message(general_b.id, &post("intrusión"))
+            .await
+            .err(),
+        ana.thread(msg_b.id).await.err(),
+        ana.search(ws_b.id, "empresa").await.err(),
+        ana.create_invite(
+            ws_b.id,
+            &CreateInviteRequest {
+                max_uses: None,
+                expires_in_hours: None,
+                role: None,
+            },
+        )
+        .await
+        .err(),
+        eva.history(general_a.id, None, None, None).await.err(),
+        eva.open_direct(ws_a.id, ana_user.id).await.err(),
+        // Nor can A open a direct conversation with someone outside A.
+        ana.open_direct(ws_a.id, eva_user.id).await.err(),
+        ana.add_channel_member(general_a.id, eva_user.id)
+            .await
+            .err(),
+    ] {
+        assert_eq!(
+            err.and_then(|e| e.code()),
+            Some(ErrorCode::NotFound),
+            "a workspace leaked"
+        );
+    }
+    assert_eq!(ana.workspaces().await.unwrap().len(), 1);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_invalid_session_cannot_open_the_websocket() {
+    let server = Server::start("sqlite::memory:").await;
+    let bogus = server.anonymous().with_token("not-a-real-token");
+    let mut live = Live::open(&bogus);
+    live.wait(|e| matches!(e, RealtimeEvent::AuthRejected).then_some(()))
+        .await;
+
+    // A token that worked stops working after logout, and its open socket is closed.
+    let (ana, _) = register(&server, "ana").await;
+    let mut live = Live::open(&ana);
+    live.ready().await;
+    ana.logout().await.unwrap();
+    live.wait(|e| matches!(e, RealtimeEvent::AuthRejected).then_some(()))
+        .await;
+    assert!(ana.me().await.unwrap_err().is_unauthenticated());
+    let mut again = Live::open(&ana);
+    again
+        .wait(|e| matches!(e, RealtimeEvent::AuthRejected).then_some(()))
+        .await;
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn retried_messages_do_not_corrupt_history() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, luis, _ws, general) = ana_and_luis(&server).await;
+    let mut luis_live = Live::open(&luis);
+    luis_live.ready().await;
+
+    // The same send retried ten times at once (a flaky network): one message, one event.
+    let req = post("sólo una vez");
+    let attempts = (0..10).map(|_| ana.post_message(general.id, &req));
+    let results = futures_util::future::join_all(attempts).await;
+    let ids: std::collections::HashSet<_> = results.into_iter().map(|r| r.unwrap().id).collect();
+    assert_eq!(ids.len(), 1);
+    let page = ana.history(general.id, None, None, None).await.unwrap();
+    assert_eq!(
+        page.messages
+            .iter()
+            .filter(|m| m.body == "sólo una vez")
+            .count(),
+        1
+    );
+    luis_live
+        .server_event(|e| matches!(e, ServerEvent::MessageCreated { .. }).then_some(()))
+        .await;
+    luis_live
+        .assert_none(Duration::from_millis(300), |e| {
+            matches!(e, ServerEvent::MessageCreated { .. })
+        })
+        .await;
+
+    // Reusing a nonce for a different place is refused, not silently merged.
+    let other = ana
+        .create_channel(
+            _ws.id,
+            &CreateChannelRequest {
+                name: "otro".into(),
+                topic: String::new(),
+                private: false,
+            },
+        )
+        .await
+        .unwrap();
+    let err = ana.post_message(other.id, &req).await.unwrap_err();
+    assert_eq!(err.code(), Some(ErrorCode::Conflict));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn direct_messages_and_threads() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, luis, ws, general) = ana_and_luis(&server).await;
+    let luis_user = luis.me().await.unwrap();
+    let mut luis_live = Live::open(&luis);
+    luis_live.ready().await;
+
+    let dm = ana.open_direct(ws.id, luis_user.id).await.unwrap();
+    assert_eq!(dm.peer.as_ref().unwrap().username, "luis");
+    ana.post_message(dm.id, &post("¿tienes un momento?"))
+        .await
+        .unwrap();
+    let got = luis_live
+        .server_event(|e| match e {
+            ServerEvent::MessageCreated { message } if message.channel_id == dm.id => {
+                Some(message.body.clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(got, "¿tienes un momento?");
+    let luis_dm = luis
+        .channels(ws.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == dm.id)
+        .unwrap();
+    assert_eq!(luis_dm.peer.unwrap().username, "ana");
+
+    // Threads: replies stay out of the channel's history and update the root.
+    let root = ana
+        .post_message(general.id, &post("propuesta: migrar a SQLite WAL"))
+        .await
+        .unwrap();
+    let reply = luis
+        .post_message(
+            general.id,
+            &PostMessageRequest {
+                thread_root_id: Some(root.id),
+                ..post("de acuerdo")
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.thread_root_id, Some(root.id));
+    let thread = ana.thread(root.id).await.unwrap();
+    assert_eq!(thread.root.reply_count, 1);
+    assert_eq!(thread.replies[0].body, "de acuerdo");
+    let history = ana.history(general.id, None, None, None).await.unwrap();
+    assert!(history.messages.iter().all(|m| m.thread_root_id.is_none()));
+    // No nested threads.
+    let nested = luis
+        .post_message(
+            general.id,
+            &PostMessageRequest {
+                thread_root_id: Some(reply.id),
+                ..post("x")
+            },
+        )
+        .await;
+    assert_eq!(nested.unwrap_err().code(), Some(ErrorCode::Invalid));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_client_reconnects_after_the_server_restarts() {
+    let (dir, db) = temp_db("reconnect");
+    let server = Server::start(&db).await;
+    let (ana, luis, _ws, general) = ana_and_luis(&server).await;
+    let port = server.port();
+    let mut luis_live = Live::open(&luis);
+    assert!(!luis_live.ready().await);
+    server.stop().await;
+    luis_live
+        .wait(|e| matches!(e, RealtimeEvent::Disconnected { .. }).then_some(()))
+        .await;
+
+    let server = Server::start_with(
+        agora_server::Config {
+            database: db.clone(),
+            ..Default::default()
+        },
+        port,
+    )
+    .await;
+    assert!(
+        luis_live.ready().await,
+        "second connection should report a reconnection"
+    );
+    ana.post_message(general.id, &post("¿me oyes otra vez?"))
+        .await
+        .unwrap();
+    let body = luis_live
+        .server_event(|e| match e {
+            ServerEvent::MessageCreated { message } => Some(message.body.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(body, "¿me oyes otra vez?");
+    server.stop().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn edits_deletes_and_reactions_follow_the_rules() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, luis, _ws, general) = ana_and_luis(&server).await;
+    let mut ana_live = Live::open(&ana);
+    ana_live.ready().await;
+    let msg = luis.post_message(general.id, &post("tpyo")).await.unwrap();
+
+    assert_eq!(
+        ana.edit_message(msg.id, "hack").await.unwrap_err().code(),
+        Some(ErrorCode::Forbidden)
+    );
+    let edited = luis.edit_message(msg.id, "typo").await.unwrap();
+    assert!(edited.edited_at.is_some());
+    ana_live
+        .server_event(|e| {
+            matches!(e, ServerEvent::MessageUpdated { message } if message.body == "typo")
+                .then_some(())
+        })
+        .await;
+
+    let reactions = ana.react(msg.id, "👍").await.unwrap();
+    assert_eq!((reactions[0].emoji.as_str(), reactions[0].count), ("👍", 1));
+    assert_eq!(
+        ana.react(msg.id, "not an emoji").await.unwrap_err().code(),
+        Some(ErrorCode::Invalid)
+    );
+
+    // Luis (a member) cannot delete Ana's messages; Ana (the owner) can moderate Luis's.
+    let ana_msg = ana.post_message(general.id, &post("mío")).await.unwrap();
+    assert_eq!(
+        luis.delete_message(ana_msg.id).await.unwrap_err().code(),
+        Some(ErrorCode::Forbidden)
+    );
+    ana.delete_message(msg.id).await.unwrap();
+    let after = ana.history(general.id, None, None, None).await.unwrap();
+    let gone = after.messages.iter().find(|m| m.id == msg.id).unwrap();
+    assert!(gone.deleted && gone.body.is_empty() && gone.reactions.is_empty());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn markup_is_stored_as_text() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, _luis, _ws, general) = ana_and_luis(&server).await;
+    let evil = "<img src=x onerror=alert(1)> ```\n<script>alert(2)</script>\n```";
+    let msg = ana.post_message(general.id, &post(evil)).await.unwrap();
+    assert_eq!(msg.body, evil);
+    let control = ana
+        .post_message(general.id, &post("abc\u{202E}gnp.exe"))
+        .await
+        .unwrap_err();
+    assert_eq!(control.code(), Some(ErrorCode::Invalid));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn invite_only_servers_need_an_invitation() {
+    let server = Server::start_with(invite_only(), 0).await;
+    // The first account bootstraps the server.
+    let (ana, _) = register(&server, "ana").await;
+    let ws = ana.create_workspace("Equipo").await.unwrap();
+    let refused = server
+        .anonymous()
+        .register(&agora_protocol::RegisterRequest {
+            username: "intruso".into(),
+            display_name: "Intruso".into(),
+            password: "a long enough password".into(),
+            invite_code: None,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Some(ErrorCode::RegistrationClosed));
+    let bad = server
+        .anonymous()
+        .register(&agora_protocol::RegisterRequest {
+            username: "intruso".into(),
+            display_name: "Intruso".into(),
+            password: "a long enough password".into(),
+            invite_code: Some("made-up".into()),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(bad, ClientError::Api { status: 410, .. }));
+
+    let invite = ana
+        .create_invite(
+            ws.id,
+            &CreateInviteRequest {
+                max_uses: Some(1),
+                expires_in_hours: Some(1),
+                role: Some(agora_core::Role::Guest),
+            },
+        )
+        .await
+        .unwrap();
+    let (guest, _) = register_with_invite(&server, "invitada", Some(&invite.code)).await;
+    let workspaces = guest.workspaces().await.unwrap();
+    assert_eq!(workspaces[0].role, agora_core::Role::Guest);
+    // Guests do not see public channels they were not added to.
+    assert!(guest.channels(ws.id).await.unwrap().is_empty());
+    // The invitation is used up.
+    let used = server
+        .anonymous()
+        .register(&agora_protocol::RegisterRequest {
+            username: "tarde".into(),
+            display_name: "Tarde".into(),
+            password: "a long enough password".into(),
+            invite_code: Some(invite.code.clone()),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(used, ClientError::Api { status: 410, .. }));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn wrong_passwords_are_refused_and_rate_limited() {
+    let mut config = agora_server::Config {
+        database: "sqlite::memory:".into(),
+        ..Default::default()
+    };
+    config.limits.auth_per_minute = 3;
+    let mut server_config = config.clone();
+    server_config.bind = "127.0.0.1:0".parse().unwrap();
+    let (router, state) = agora_server::build(server_config).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(agora_server::serve(
+        listener,
+        router,
+        std::future::pending(),
+    ));
+    let anon = agora_client::Client::new(agora_client::parse_server_url(&url).unwrap()).unwrap();
+    anon.register(&agora_protocol::RegisterRequest {
+        username: "ana".into(),
+        display_name: "Ana".into(),
+        password: "ana-test-password".into(),
+        invite_code: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        anon.login("ana", "wrong password!")
+            .await
+            .unwrap_err()
+            .code(),
+        Some(ErrorCode::Unauthenticated)
+    );
+    assert_eq!(
+        anon.login("nadie", "wrong password!")
+            .await
+            .unwrap_err()
+            .code(),
+        Some(ErrorCode::Unauthenticated)
+    );
+    assert_eq!(
+        anon.login("ana", "ana-test-password")
+            .await
+            .unwrap_err()
+            .code(),
+        Some(ErrorCode::RateLimited)
+    );
+    state.store.close().await;
+}
