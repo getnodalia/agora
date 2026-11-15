@@ -3,14 +3,19 @@
 #
 #   $DIST/agora-<version>-linux-<arch>.AppImage        the desktop app, any distro with glibc >= the build host's
 #   $DIST/agora-<version>-linux-<arch>.AppImage.zsync  delta updates (needs zsyncmake)
-#   $DIST/agora-<version>-linux-<arch>.deb             desktop app and server: Debian, Ubuntu, Mint...
-#   $DIST/agora-<version>-linux-<arch>.rpm             desktop app and server: Fedora, openSUSE, RHEL...
-#   $DIST/agora-<version>-linux-<arch>.tar.gz          both binaries in a plain bin/ + share/ tree
+#   $DIST/agora-<version>-linux-<arch>.deb             the desktop app: Debian, Ubuntu, Mint...
+#   $DIST/agora-<version>-linux-<arch>.rpm             the desktop app: Fedora, openSUSE, RHEL...
+#   $DIST/agora-<version>-linux-<arch>.tar.gz          the desktop app in a plain bin/ + share/ tree
+#   $DIST/agora-server-<version>-linux-<arch>.deb      the server, its systemd service and config
+#   $DIST/agora-server-<version>-linux-<arch>.rpm      the same for Fedora, RHEL...
+#   $DIST/agora-server-<version>-linux-<arch>.tar.gz   the server with install.sh (any systemd Linux)
+#   $DIST/agora-server-linux-<arch>.tar.gz             the same, under a name .../latest/download/ finds
 #
-# The packages install the desktop app (agora), the server (agora-server), the desktop entry, the
-# AppStream metainfo and the hicolor icons. The AppImage carries the desktop app only.
+# The desktop packages install the app (agora), its desktop entry, AppStream metainfo and hicolor
+# icons. The server packages (packaging/linux/server/) carry no desktop libraries, so they suit a
+# headless machine or a Proxmox container.
 #
-# Usage: packaging/linux/package.sh [--skip-build] [--formats "appimage deb rpm tar"]
+# Usage: packaging/linux/package.sh [--skip-build] [--formats "appimage deb rpm tar server"]
 #
 # Needs: cargo; nfpm for deb/rpm (https://nfpm.goreleaser.com). The AppImage tooling is downloaded
 # at verified pins into $CARGO_TARGET_DIR. Build on an old distro (CI: Ubuntu 22.04, glibc 2.35)
@@ -23,7 +28,7 @@ HERE="$ROOT/packaging/linux"
 . "$HERE/verified-download.sh"
 
 SKIP_BUILD=0
-FORMATS="appimage deb rpm tar"
+FORMATS="appimage deb rpm tar server"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-build) SKIP_BUILD=1; shift ;;
@@ -78,6 +83,7 @@ has() { case " $FORMATS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 if has tar; then
   mkdir -p "$WORK/tar"
   cp -R "$STAGE/usr" "$WORK/tar/$BASENAME"
+  rm -f "$WORK/tar/$BASENAME/bin/agora-server"
   tar -C "$WORK/tar" -czf "$DIST/$BASENAME.tar.gz" "$BASENAME"
   echo "wrote $DIST/$BASENAME.tar.gz"
 fi
@@ -88,10 +94,33 @@ if has deb || has rpm; then
   export VERSION
   export NFPM_ARCH="$DEB_ARCH"
   # nfpm expands env vars in fields like `version` and `arch`, but not in `contents[].src`.
-  sed -e "s|\${STAGE}|$STAGE|g" -e "s|@GLIBC_FLOOR@|${GLIBC_FLOOR:-2.35}|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
-  for fmt in deb rpm; do
-    if has "$fmt"; then (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p "$fmt" -t "$DIST/$BASENAME.$fmt"); fi
+  for spec in nfpm.yaml server/nfpm.yaml; do
+    sed -e "s|\${STAGE}|$STAGE|g" -e "s|@SERVER@|$HERE/server|g" \
+      -e "s|@GLIBC_FLOOR@|${GLIBC_FLOOR:-2.35}|g" "$HERE/$spec" >"$WORK/${spec//\//-}"
   done
+  SERVER_BASENAME="agora-server-$VERSION-linux-$ARCH"
+  for fmt in deb rpm; do
+    if has "$fmt"; then
+      (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p "$fmt" -t "$DIST/$BASENAME.$fmt")
+      if has server; then
+        (cd "$ROOT" && nfpm package -f "$WORK/server-nfpm.yaml" -p "$fmt" -t "$DIST/$SERVER_BASENAME.$fmt")
+      fi
+    fi
+  done
+fi
+
+# ---- server tarball ------------------------------------------------------------------------------
+if has server; then
+  SERVER_BASENAME="agora-server-$VERSION-linux-$ARCH"
+  SDIR="$WORK/server/$SERVER_BASENAME"
+  mkdir -p "$SDIR"
+  install -m755 "$STAGE/usr/bin/agora-server" "$SDIR/agora-server"
+  install -m755 "$HERE/server/install.sh" "$SDIR/install.sh"
+  install -m644 "$HERE/server/agora.toml" "$HERE/server/agora-server.service" \
+    "$HERE/server/README.md" "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$SDIR/"
+  tar -C "$WORK/server" -czf "$DIST/$SERVER_BASENAME.tar.gz" "$SERVER_BASENAME"
+  cp "$DIST/$SERVER_BASENAME.tar.gz" "$DIST/agora-server-linux-$ARCH.tar.gz"
+  echo "wrote $DIST/$SERVER_BASENAME.tar.gz (and agora-server-linux-$ARCH.tar.gz)"
 fi
 
 # ---- AppImage -----------------------------------------------------------------------------------

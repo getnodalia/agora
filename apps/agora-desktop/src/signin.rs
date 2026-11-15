@@ -55,8 +55,10 @@ pub fn show(ui: &mut Ui, app: &mut App) -> Vec<Action> {
 
     let bar = full.with_max_y(full.top() + layout::APP_BAR);
     let ndl = app.ndl_controls();
-    if ndl {
+    if chrome::drags_window(ndl) {
         chrome::drag_area(ui, bar);
+    }
+    if ndl {
         chrome::controls(ui, bar, &look.palette, mode);
     }
 

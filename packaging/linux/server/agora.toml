@@ -1,0 +1,29 @@
+# Ágora server settings (installed as /etc/agora/agora.toml; your edits survive upgrades).
+# After a change: sudo systemctl restart agora-server
+# Every key is optional. AGORA_BIND, AGORA_DATABASE, AGORA_REGISTRATION and AGORA_TRUST_PROXY
+# override the file. Details: https://github.com/getnodalia/agora/blob/main/docs/deployment.md
+
+# Shown to clients on the sign-in screen.
+name = "Ágora"
+
+# Address and port. Loopback with a TLS reverse proxy (Caddy, nginx) on the same machine.
+# With the proxy on another machine (Nginx Proxy Manager, a Proxmox LXC behind your router's
+# proxy...), listen on "0.0.0.0:7878" and set trust_proxy = true.
+bind = "127.0.0.1:7878"
+
+# SQLite database (created if missing). It holds accounts, metadata and ciphertext.
+database = "sqlite:///var/lib/agora/agora.db"
+
+# Who may create an account: "open", "invite_only" or "closed".
+# The first account on a server can always register; it owns the server and makes invitations.
+registration = "invite_only"
+
+# Days a session lasts after signing in.
+session_days = 30
+
+# Behind a reverse proxy that terminates TLS and sets X-Forwarded-For.
+trust_proxy = false
+
+# Listen on a public address without TLS. Passwords would travel in clear text:
+# only for an isolated lab network.
+allow_insecure_public_bind = false

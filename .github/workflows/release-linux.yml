@@ -132,12 +132,18 @@ jobs:
           "./$app" --appimage-extract >/dev/null
           squashfs-root/usr/bin/agora --version | tee version.txt
           grep -q "agora $VERSION" version.txt
-          command -v tar >/dev/null || dnf -y install tar gzip >/dev/null
-          tar -xzf "agora-$VERSION-linux-x86_64.tar.gz"
-          server="$PWD/agora-$VERSION-linux-x86_64/bin/agora-server"
+          if command -v dnf >/dev/null; then dnf -y install tar gzip shadow-utils util-linux >/dev/null; fi
+          # The server tarball's installer, as on a headless machine (no systemd in a container,
+          # so it only lays the files out), then the server as its own user with its own config.
+          tar -xzf "agora-server-$VERSION-linux-x86_64.tar.gz"
+          "./agora-server-$VERSION-linux-x86_64/install.sh"
+          getent passwd agora
+          test "$(stat -c %U /var/lib/agora)" = agora
+          test -f /etc/agora/agora.toml
+          server=/usr/local/bin/agora-server
           "$server" --version | grep -q "agora-server $VERSION"
-          mkdir -p /tmp/srv && cd /tmp/srv
-          AGORA_BIND=127.0.0.1:7878 "$server" >server.log 2>&1 &
+          cd /var/lib/agora
+          su -s /bin/sh agora -c "$server --config /etc/agora/agora.toml" >/tmp/server.log 2>&1 &
           pid=$!
           for _ in $(seq 1 30); do
             # bash's /dev/tcp: the images have no curl. A refused connection only ends the subshell.
@@ -151,9 +157,37 @@ jobs:
             fi
             sleep 1
           done
-          cat server.log
+          cat /tmp/server.log
           echo "the server did not answer /healthz" >&2
           exit 1
+
+      - name: Install the server package
+        shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          # A clean machine for the package: the tarball step above installed by hand.
+          rm -rf /etc/agora /usr/local/bin/agora-server
+          if command -v apt-get >/dev/null; then
+            apt-get update >/dev/null
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "./agora-server-$VERSION-linux-x86_64.deb"
+            # Only the server: none of the desktop's windowing libraries came with it.
+            if dpkg -s libxkbcommon0 >/dev/null 2>&1; then
+              echo "the server package pulled in desktop libraries" >&2
+              exit 1
+            fi
+          elif command -v dnf >/dev/null; then
+            dnf -y install "./agora-server-$VERSION-linux-x86_64.rpm"
+          else
+            echo "no package manager for this image's packages; the tarball covered it"
+            exit 0
+          fi
+          /usr/bin/agora-server --version | grep -q "agora-server $VERSION"
+          test -f /usr/lib/systemd/system/agora-server.service
+          test "$(stat -c %G /etc/agora/agora.toml)" = agora
+          getent passwd agora
 
   attach:
     # Nothing reaches a release unless every check above passed.

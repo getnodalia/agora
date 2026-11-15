@@ -148,7 +148,7 @@ fn top_bar(
     actions: &mut Vec<Action>,
 ) {
     let p = &look.palette;
-    if ndl {
+    if chrome::drags_window(ndl) {
         chrome::drag_area(ui, bar);
     }
     let right_reserved = if ndl {
@@ -157,7 +157,10 @@ fn top_bar(
         layout::GAP
     };
     let inner = Rect::from_min_max(
-        pos2(bar.left() + layout::GAP, bar.top()),
+        pos2(
+            bar.left() + layout::GAP + chrome::leading_inset(),
+            bar.top(),
+        ),
         pos2(bar.right() - right_reserved, bar.bottom()),
     );
     ui.scope_builder(

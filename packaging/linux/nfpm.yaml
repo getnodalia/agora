@@ -18,11 +18,11 @@ description: |-
   Self-hosted, open-source team chat.
   Workspaces, channels, direct messages, threads and reactions on a server you
   run yourself, end-to-end encrypted with MLS. Installs the native desktop app
-  (agora) and the server (agora-server, one binary with a SQLite file).
+  (agora). The server is the separate agora-server package.
 
 # The binaries link glibc and libgcc_s. Windowing (X11/Wayland, xkbcommon) and OpenGL are loaded
 # at runtime with dlopen, so they aren't ELF NEEDED entries and the package tools can't find them:
-# they are listed here. The server needs none of them.
+# they are listed here.
 overrides:
   deb:
     depends:
@@ -59,9 +59,6 @@ overrides:
 contents:
   - src: ${STAGE}/usr/bin/agora
     dst: /usr/bin/agora
-    file_info: { mode: 0755 }
-  - src: ${STAGE}/usr/bin/agora-server
-    dst: /usr/bin/agora-server
     file_info: { mode: 0755 }
   - src: ${STAGE}/usr/share/
     dst: /usr/share/
