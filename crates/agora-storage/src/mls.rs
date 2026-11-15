@@ -310,20 +310,21 @@ impl Store {
         after: i64,
         limit: u32,
     ) -> Result<(Vec<LogEntry>, bool)> {
-        let limit = i64::from(limit.max(1));
+        let limit = limit.max(1);
         let rows = sqlx::query(
             "SELECT seq, epoch, kind, author_id, message_id, data FROM mls_log
              WHERE channel_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
         )
         .bind(channel.0)
         .bind(after)
-        .bind(limit + 1)
+        .bind(i64::from(limit) + 1)
         .fetch_all(&self.pool)
         .await?;
-        let has_more = rows.len() as i64 > limit;
+        let shown = usize::try_from(limit).unwrap_or(usize::MAX);
+        let has_more = rows.len() > shown;
         let entries = rows
             .iter()
-            .take(limit as usize)
+            .take(shown)
             .map(|r| {
                 let kind: String = r.try_get("kind")?;
                 Ok(LogEntry {
