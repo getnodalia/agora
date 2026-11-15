@@ -1,0 +1,42 @@
+[package]
+name = "agora-server"
+description = "Ágora's self-hostable server: HTTP API, WebSockets and SQLite storage in one small binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "agora-server"
+path = "src/main.rs"
+
+[dependencies]
+agora-core.workspace = true
+agora-protocol.workspace = true
+agora-storage.workspace = true
+argon2.workspace = true
+axum.workspace = true
+base64.workspace = true
+futures-util.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+agora-client.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true

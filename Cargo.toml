@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agora-core",
+    "crates/agora-protocol",
+    "crates/agora-storage",
+    "crates/agora-client",
+    "apps/agora-server",
+    "apps/agora-desktop",
+]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/getnodalia/agora"
+authors = ["Nodalia"]
+
+[workspace.dependencies]
+agora-core = { path = "crates/agora-core" }
+agora-protocol = { path = "crates/agora-protocol" }
+agora-storage = { path = "crates/agora-storage" }
+agora-client = { path = "crates/agora-client" }
+agora-server = { path = "apps/agora-server" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+axum = { version = "0.8", features = ["ws"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["limit", "trace", "set-header"] }
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+toml = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+url = "2"
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
+egui = "0.37"
+nodalia-theme = { git = "https://github.com/getnodalia/nodalia-design", rev = "4c5cb77596d73031a747c1209845a3f392ee51e7", features = ["egui", "creator"] }
+directories = "6"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
