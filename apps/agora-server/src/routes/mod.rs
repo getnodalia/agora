@@ -24,7 +24,10 @@ pub fn router() -> Router<AppState> {
         .route("/auth/register", post(accounts::register))
         .route("/auth/login", post(accounts::login))
         .route("/auth/logout", post(accounts::logout))
-        .route("/auth/sessions/revoke-others", post(accounts::revoke_other_sessions))
+        .route(
+            "/auth/sessions/revoke-others",
+            post(accounts::revoke_other_sessions),
+        )
         .route("/me", get(accounts::me).patch(accounts::update_me))
         .route("/devices/me", put(e2e::register_device))
         .route("/devices/me/key_packages", post(e2e::publish_key_packages))

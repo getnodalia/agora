@@ -584,14 +584,22 @@ async fn wrong_passwords_are_refused_and_rate_limited() {
 async fn revoking_other_sessions_requires_password_and_preserves_other_users() {
     let server = Server::start("sqlite::memory:").await;
     let (owner, _) = register(&server, "owner").await;
-    let (other_owner, _) = server.anonymous().login("owner", "owner-test-password").await.unwrap();
+    let (other_owner, _) = server
+        .anonymous()
+        .login("owner", "owner-test-password")
+        .await
+        .unwrap();
     let (stranger, _) = register(&server, "stranger").await;
     let mut live = Live::open(&other_owner);
     live.ready().await;
     assert!(owner.revoke_other_sessions("wrong password").await.is_err());
     assert!(other_owner.me().await.is_ok());
-    owner.revoke_other_sessions("owner-test-password").await.unwrap();
-    live.wait(|event| matches!(event, RealtimeEvent::AuthRejected).then_some(())).await;
+    owner
+        .revoke_other_sessions("owner-test-password")
+        .await
+        .unwrap();
+    live.wait(|event| matches!(event, RealtimeEvent::AuthRejected).then_some(()))
+        .await;
     assert!(other_owner.me().await.is_err());
     assert!(owner.me().await.is_ok());
     assert!(stranger.me().await.is_ok());

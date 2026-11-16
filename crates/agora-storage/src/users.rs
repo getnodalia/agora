@@ -139,13 +139,13 @@ impl Store {
 
     /// Delete every other session of this user and return their IDs for socket closure.
     pub async fn delete_other_sessions(&self, user: UserId, current_id: i64) -> Result<Vec<i64>> {
-        Ok(sqlx::query_scalar(
-            "DELETE FROM sessions WHERE user_id = ? AND id <> ? RETURNING id",
+        Ok(
+            sqlx::query_scalar("DELETE FROM sessions WHERE user_id = ? AND id <> ? RETURNING id")
+                .bind(user.0)
+                .bind(current_id)
+                .fetch_all(&self.pool)
+                .await?,
         )
-        .bind(user.0)
-        .bind(current_id)
-        .fetch_all(&self.pool)
-        .await?)
     }
 
     pub async fn delete_expired_sessions(&self, now: Timestamp) -> Result<u64> {

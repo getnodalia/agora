@@ -166,20 +166,28 @@ pub async fn revoke_other_sessions(
     ) {
         return Err(AppError::rate_limited());
     }
-    let wrong = || AppError::new(
-        StatusCode::UNAUTHORIZED,
-        ErrorCode::Unauthenticated,
-        "authentication failed",
-    );
+    let wrong = || {
+        AppError::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthenticated,
+            "authentication failed",
+        )
+    };
     if req.password.chars().count() > agora_core::limits::PASSWORD_MAX {
         return Err(wrong());
     }
-    let (_, hash) = state.store.user_credentials(&auth.user.username).await?
+    let (_, hash) = state
+        .store
+        .user_credentials(&auth.user.username)
+        .await?
         .ok_or_else(wrong)?;
     if !auth::verify_password(req.password, hash).await {
         return Err(wrong());
     }
-    let ids = state.store.delete_other_sessions(auth.user.id, auth.session_id).await?;
+    let ids = state
+        .store
+        .delete_other_sessions(auth.user.id, auth.session_id)
+        .await?;
     for id in &ids {
         state.hub.close_session(*id);
     }
