@@ -655,6 +655,9 @@ fn conversation(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &m
                     );
                 }
                 ui.vertical(|ui| {
+                    // The icon is centred in the 56-point header. Leave room for the
+                    // smaller topic line when present and centre a single-line title.
+                    ui.add_space(if channel.topic.is_empty() { 16.0 } else { 4.0 });
                     let title = if direct {
                         peer_name(&channel)
                     } else {
