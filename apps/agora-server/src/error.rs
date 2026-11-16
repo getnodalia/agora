@@ -83,6 +83,11 @@ impl From<StoreError> for AppError {
         match e {
             StoreError::Conflict => AppError::conflict("it already exists"),
             StoreError::NotFound => AppError::not_found(),
+            StoreError::InitializationDenied => AppError::new(
+                StatusCode::FORBIDDEN,
+                ErrorCode::RegistrationClosed,
+                "server initialization is not authorized or already completed",
+            ),
             StoreError::StaleEpoch => AppError::stale_epoch(),
             StoreError::InviteExhausted => AppError::new(
                 StatusCode::GONE,

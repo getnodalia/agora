@@ -9,9 +9,10 @@ use tracing_subscriber::EnvFilter;
 const HELP: &str = "agora-server: Ágora's self-hostable server
 
 USAGE:
-    agora-server [--config FILE]
+    agora-server [--config FILE] [init-token]
 
 OPTIONS:
+    init-token          Create a one-use setup token, valid for 15 minutes
     -c, --config FILE   TOML configuration (see docs/deployment.md)
     -h, --help          Print this help
     -V, --version       Print the version
@@ -28,8 +29,10 @@ ENVIRONMENT:
 fn main() -> ExitCode {
     let mut config_path = std::env::var_os("AGORA_CONFIG").map(PathBuf::from);
     let mut args = std::env::args().skip(1);
+    let mut init_token = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "init-token" if !init_token => init_token = true,
             "-h" | "--help" => {
                 print!("{HELP}");
                 return ExitCode::SUCCESS;
@@ -75,7 +78,12 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(run(config)) {
+    let result = if init_token {
+        runtime.block_on(create_init_token(config))
+    } else {
+        runtime.block_on(run(config))
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("agora-server: {e}");
@@ -97,5 +105,18 @@ async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     })
     .await?;
     state.store.close().await;
+    Ok(())
+}
+
+/// This command needs access to the server's database. The plaintext token is printed once.
+async fn create_init_token(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    let store = agora_storage::Store::open(&config.database).await?;
+    let token = agora_server::auth::random_token(32);
+    let expires_at = agora_server::auth::now_ms().saturating_add(15 * 60 * 1_000);
+    store
+        .set_initialization_token(&agora_server::auth::token_hash(&token), expires_at)
+        .await?;
+    store.close().await;
+    println!("Setup token (valid for 15 minutes; enter as the invitation code): {token}");
     Ok(())
 }

@@ -15,7 +15,7 @@ bind = "127.0.0.1:7878"
 database = "sqlite:///var/lib/agora/agora.db"
 
 # Who may create an account: "open", "invite_only" or "closed".
-# The first account on a server can always register; it owns the server and makes invitations.
+# Initialize a new server with agora-server init-token; see docs/deployment.md.
 registration = "invite_only"
 
 # Days a session lasts after signing in.

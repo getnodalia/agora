@@ -4,7 +4,7 @@ use agora_core::UserId;
 use agora_protocol::{Timestamp, User};
 use sqlx::Row;
 
-use crate::{conflict, rows, Result, Store};
+use crate::{conflict, rows, Result, Store, StoreError};
 
 /// A session found by its token.
 #[derive(Clone, Debug)]
@@ -33,6 +33,66 @@ impl Store {
         .fetch_one(&self.pool)
         .await
         .map_err(conflict)?;
+        Ok(User {
+            id: UserId(id),
+            username: username.to_owned(),
+            display_name: display_name.to_owned(),
+        })
+    }
+
+    /// Replace the short-lived setup token only while the server is uninitialized.
+    pub async fn set_initialization_token(&self, hash: &[u8], expires_at: Timestamp) -> Result<()> {
+        let n = sqlx::query(
+            "UPDATE server_initialization SET token_hash = ?, expires_at = ?
+             WHERE id = 1 AND initialized = 0 AND NOT EXISTS (SELECT 1 FROM users)",
+        )
+        .bind(hash)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        if n != 1 {
+            return Err(StoreError::InitializationDenied);
+        }
+        Ok(())
+    }
+
+    /// Consume the setup token and create the first account as one serialized transaction.
+    pub async fn initialize_user(
+        &self,
+        username: &str,
+        display_name: &str,
+        password_hash: &str,
+        token_hash: &[u8],
+        now: Timestamp,
+    ) -> Result<User> {
+        let mut tx = self.pool.begin().await?;
+        let n = sqlx::query(
+            "UPDATE server_initialization
+             SET initialized = 1, token_hash = NULL, expires_at = NULL
+             WHERE id = 1 AND initialized = 0 AND token_hash = ? AND expires_at > ?
+             AND NOT EXISTS (SELECT 1 FROM users)",
+        )
+        .bind(token_hash)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if n != 1 {
+            return Err(StoreError::InitializationDenied);
+        }
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (username, display_name, password_hash, created_at)
+             VALUES (?, ?, ?, ?) RETURNING id",
+        )
+        .bind(username)
+        .bind(display_name)
+        .bind(password_hash)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(conflict)?;
+        tx.commit().await?;
         Ok(User {
             id: UserId(id),
             username: username.to_owned(),

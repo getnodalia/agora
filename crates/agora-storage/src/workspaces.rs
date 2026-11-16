@@ -240,6 +240,59 @@ impl Store {
         })
     }
 
+    /// Atomically consume an invitation, create an account and join its workspace.
+    /// Any failure rolls back all three operations, including the invitation use.
+    pub async fn create_invited_user(
+        &self,
+        username: &str,
+        display_name: &str,
+        password_hash: &str,
+        code_hash: &[u8],
+        now: Timestamp,
+    ) -> Result<(agora_protocol::User, Joined)> {
+        let mut tx = self.pool.begin().await?;
+        // The conditional write takes SQLite's write lock before any reads, serializing
+        // competing registrations and rechecking expiry after password hashing.
+        let row = sqlx::query(
+            "UPDATE invites SET uses = uses + 1
+             WHERE code_hash = ? AND uses < max_uses AND expires_at > ?
+             RETURNING workspace_id, role",
+        )
+        .bind(code_hash)
+        .bind(now)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::InviteExhausted)?;
+        let workspace = WorkspaceId(row.try_get("workspace_id")?);
+        let role = rows::role(row.try_get("role")?)?;
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (username, display_name, password_hash, created_at)
+             VALUES (?, ?, ?, ?) RETURNING id",
+        )
+        .bind(username)
+        .bind(display_name)
+        .bind(password_hash)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(crate::conflict)?;
+        let user = agora_protocol::User {
+            id: UserId(id),
+            username: username.to_owned(),
+            display_name: display_name.to_owned(),
+        };
+        add_member(&mut tx, workspace, user.id, role, now).await?;
+        tx.commit().await?;
+        Ok((
+            user,
+            Joined {
+                workspace_id: workspace,
+                role,
+                new_member: true,
+            },
+        ))
+    }
+
     /// Add a member directly (used by tests and administration tools).
     pub async fn add_member(
         &self,

@@ -42,8 +42,11 @@ in `agora.toml` set `bind = "0.0.0.0:7878"` and `trust_proxy = true`, point the 
 `http://<this machine's IP>:7878`, and turn on WebSockets for it (live messages use
 `/api/v1/ws`). Then only the proxy should reach port 7878.
 
-In the desktop app, the server is `https://chat.example.org`. The first account to register owns
-the server; with `registration = "invite_only"` everyone else needs an invitation from it.
+On a new installation, run `sudo -u agora agora-server --config /etc/agora/agora.toml init-token`.
+Enter the token in the invitation code field to create the first account within 15 minutes.
+Existing installations with users do not need this step. In the desktop app, the server is
+`https://chat.example.org`. With `registration = "invite_only"` subsequent accounts need an
+invitation from a workspace owner.
 
 ## Proxmox
 

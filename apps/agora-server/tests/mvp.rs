@@ -548,11 +548,20 @@ async fn wrong_passwords_are_refused_and_rate_limited() {
         std::future::pending(),
     ));
     let anon = agora_client::Client::new(agora_client::parse_server_url(&url).unwrap()).unwrap();
+    let token = agora_server::auth::random_token(32);
+    state
+        .store
+        .set_initialization_token(
+            &agora_server::auth::token_hash(&token),
+            agora_server::auth::now_ms() + 900_000,
+        )
+        .await
+        .unwrap();
     anon.register(&agora_protocol::RegisterRequest {
         username: "ana".into(),
         display_name: "Ana".into(),
         password: "ana-test-password".into(),
-        invite_code: None,
+        invite_code: Some(token),
     })
     .await
     .unwrap();
@@ -578,4 +587,155 @@ async fn wrong_passwords_are_refused_and_rate_limited() {
         Some(ErrorCode::RateLimited)
     );
     state.store.close().await;
+}
+
+#[tokio::test]
+async fn simultaneous_registrations_cannot_share_one_invitation() {
+    let (dir, database) = temp_db("invite-race");
+    let mut config = invite_only();
+    config.database = database;
+    let server = Server::start_with(config, 0).await;
+    let (owner, _) = register(&server, "owner").await;
+    let ws = owner.create_workspace("Lab").await.unwrap();
+    let invite = owner
+        .create_invite(
+            ws.id,
+            &CreateInviteRequest {
+                max_uses: Some(1),
+                expires_in_hours: Some(1),
+                role: Some(agora_core::Role::Member),
+            },
+        )
+        .await
+        .unwrap();
+    let request = |name: &str| agora_protocol::RegisterRequest {
+        username: name.into(),
+        display_name: name.into(),
+        password: "a sufficiently long password".into(),
+        invite_code: Some(invite.code.clone()),
+    };
+    let a = server.anonymous();
+    let b = server.anonymous();
+    let first = request("alice");
+    let second = request("bruno");
+    let (one, two) = tokio::join!(a.register(&first), b.register(&second));
+    assert_ne!(one.is_ok(), two.is_ok());
+    let loser = if one.is_err() { "alice" } else { "bruno" };
+    assert!(server
+        .state
+        .store
+        .user_credentials(loser)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(server.state.store.user_count().await.unwrap(), 2);
+    server.stop().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn initialization_requires_a_fresh_single_use_token() {
+    let (dir, database) = temp_db("bootstrap");
+    let mut config = invite_only();
+    config.database = database;
+    let server = Server::start_with(config, 0).await;
+    let request = |code: Option<&str>, name: &str| agora_protocol::RegisterRequest {
+        username: name.into(),
+        display_name: name.into(),
+        password: "a sufficiently long password".into(),
+        invite_code: code.map(str::to_owned),
+    };
+    let client = server.anonymous();
+    assert!(client.register(&request(None, "owner")).await.is_err());
+    server
+        .state
+        .store
+        .set_initialization_token(
+            &agora_server::auth::token_hash("expired"),
+            agora_server::auth::now_ms() - 1,
+        )
+        .await
+        .unwrap();
+    assert!(client
+        .register(&request(Some("expired"), "owner"))
+        .await
+        .is_err());
+    server
+        .state
+        .store
+        .set_initialization_token(
+            &agora_server::auth::token_hash("old"),
+            agora_server::auth::now_ms() + 900_000,
+        )
+        .await
+        .unwrap();
+    server
+        .state
+        .store
+        .set_initialization_token(
+            &agora_server::auth::token_hash("new"),
+            agora_server::auth::now_ms() + 900_000,
+        )
+        .await
+        .unwrap();
+    assert!(client
+        .register(&request(Some("old"), "owner"))
+        .await
+        .is_err());
+    let other = server.anonymous();
+    let first = request(Some("new"), "owner");
+    let second = request(Some("new"), "rival");
+    let (a, b) = tokio::join!(client.register(&first), other.register(&second));
+    assert_ne!(a.is_ok(), b.is_ok());
+    assert_eq!(server.state.store.user_count().await.unwrap(), 1);
+    assert!(server
+        .state
+        .store
+        .set_initialization_token(b"another", i64::MAX)
+        .await
+        .is_err());
+    assert!(client
+        .register(&request(Some("new"), "later"))
+        .await
+        .is_err());
+    server.stop().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn existing_database_migrates_without_resetting_accounts_or_sessions() {
+    let (dir, database) = temp_db("bootstrap-migration");
+    let server = Server::start(&database).await;
+    let (client, user) = register(&server, "owner").await;
+    // Recreate the 0.1.2 schema state while retaining its users and sessions.
+    agora_storage::sqlx::query("DROP TABLE server_initialization")
+        .execute(server.state.store.pool())
+        .await
+        .unwrap();
+    agora_storage::sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 3")
+        .execute(server.state.store.pool())
+        .await
+        .unwrap();
+    let port = server.port();
+    server.stop().await;
+    let config = agora_server::Config {
+        database: database.clone(),
+        ..Default::default()
+    };
+    let server = Server::start_with(config, port).await;
+    assert_eq!(client.me().await.unwrap().id, user.id);
+    assert!(server
+        .state
+        .store
+        .set_initialization_token(b"token", i64::MAX)
+        .await
+        .is_err());
+    let (_, session) = server
+        .anonymous()
+        .login("owner", "owner-test-password")
+        .await
+        .unwrap();
+    assert_eq!(session.user.id, user.id);
+    server.stop().await;
+    std::fs::remove_dir_all(dir).unwrap();
 }
