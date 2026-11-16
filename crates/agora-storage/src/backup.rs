@@ -31,18 +31,17 @@ pub async fn create(database: &str, destination: &Path) -> Result<(), BackupErro
         return Err(BackupError::Memory);
     }
     let path = destination.to_str().ok_or(BackupError::InvalidPath)?;
-    let mut options = std::fs::OpenOptions::new();
+    let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
     // Reserve a new empty file without following a pre-existing link or overwriting anything.
-    drop(options.open(destination)?);
+    drop(options.open(destination).await?);
     let result = snapshot(database, path).await;
     if result.is_err() {
-        let _ = std::fs::remove_file(destination);
+        let _ = tokio::fs::remove_file(destination).await;
     }
     result
 }
