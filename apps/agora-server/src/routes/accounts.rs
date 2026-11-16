@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use agora_core::validate;
 use agora_protocol::{
-    ErrorCode, LoginRequest, RegisterRequest, ServerInfo, SessionResponse, UpdateProfileRequest,
-    User,
+    ErrorCode, LoginRequest, RegisterRequest, RevokeOtherSessionsRequest, ServerInfo,
+    SessionResponse, UpdateProfileRequest, User,
 };
 use agora_storage::StoreError;
 use axum::extract::{ConnectInfo, State};
@@ -151,6 +151,39 @@ pub async fn logout(State(state): State<AppState>, auth: Auth) -> AppResult<Stat
     if let Some(id) = state.store.delete_session(&auth.token_hash).await? {
         state.hub.close_session(id);
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Require the account password again before revoking other sessions.
+pub async fn revoke_other_sessions(
+    State(state): State<AppState>,
+    auth: Auth,
+    Json(req): Json<RevokeOtherSessionsRequest>,
+) -> AppResult<StatusCode> {
+    if !state.limiter.allow(
+        &format!("reauth:{}", auth.user.id),
+        state.config.limits.auth_per_minute,
+    ) {
+        return Err(AppError::rate_limited());
+    }
+    let wrong = || AppError::new(
+        StatusCode::UNAUTHORIZED,
+        ErrorCode::Unauthenticated,
+        "authentication failed",
+    );
+    if req.password.chars().count() > agora_core::limits::PASSWORD_MAX {
+        return Err(wrong());
+    }
+    let (_, hash) = state.store.user_credentials(&auth.user.username).await?
+        .ok_or_else(wrong)?;
+    if !auth::verify_password(req.password, hash).await {
+        return Err(wrong());
+    }
+    let ids = state.store.delete_other_sessions(auth.user.id, auth.session_id).await?;
+    for id in &ids {
+        state.hub.close_session(*id);
+    }
+    tracing::info!(user = %auth.user.id, count = ids.len(), "other sessions revoked");
     Ok(StatusCode::NO_CONTENT)
 }
 

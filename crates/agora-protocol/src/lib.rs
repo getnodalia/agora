@@ -104,6 +104,12 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+/// Reauthenticate before revoking all other sessions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RevokeOtherSessionsRequest {
+    pub password: String,
+}
+
 /// A new session. The token is shown once; the server keeps only its hash.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionResponse {

@@ -217,6 +217,14 @@ impl Client {
         self.post::<_, ()>("/auth/logout", &()).await
     }
 
+    /// Reauthenticate and sign out every other session belonging to this account.
+    pub async fn revoke_other_sessions(&self, password: &str) -> Result<()> {
+        let req = RevokeOtherSessionsRequest {
+            password: password.to_owned(),
+        };
+        self.post("/auth/sessions/revoke-others", &req).await
+    }
+
     pub async fn me(&self) -> Result<User> {
         self.get("/me").await
     }
