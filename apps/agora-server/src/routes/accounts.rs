@@ -68,12 +68,15 @@ pub async fn register(
         .map(str::trim)
         .filter(|c| !c.is_empty());
 
-    // The very first account can always be created, so a fresh invite-only server can be set up.
     let first = state.store.user_count().await? == 0;
-    let allowed = match state.config.registration {
-        RegistrationPolicy::Open => true,
-        RegistrationPolicy::InviteOnly => invite.is_some() || first,
-        RegistrationPolicy::Closed => first,
+    let allowed = if first {
+        invite.is_some()
+    } else {
+        match state.config.registration {
+            RegistrationPolicy::Open => true,
+            RegistrationPolicy::InviteOnly => invite.is_some(),
+            RegistrationPolicy::Closed => false,
+        }
     };
     if !allowed {
         return Err(AppError::new(
@@ -84,7 +87,15 @@ pub async fn register(
     }
     let invite_hash = invite.map(auth::token_hash);
     let hash = auth::hash_password(req.password).await?;
-    let created = if let Some(invite_hash) = &invite_hash {
+    let created = if first {
+        // Every path rechecks initialization under a SQLite write lock after hashing.
+        let token_hash = invite_hash.as_deref().ok_or_else(|| {
+            AppError::new(StatusCode::FORBIDDEN, ErrorCode::RegistrationClosed,
+                "a server initialization token is required")
+        })?;
+        state.store.initialize_user(&username, &display_name, &hash, token_hash, now_ms())
+            .await.map(|user| (user, None))
+    } else if let Some(invite_hash) = &invite_hash {
         state
             .store
             .create_invited_user(&username, &display_name, &hash, invite_hash, now_ms())

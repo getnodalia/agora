@@ -52,9 +52,24 @@ Proxmox's own container backups cover the database.
 name = "Our team"
 bind = "127.0.0.1:7878"
 database = "sqlite:///var/lib/agora/agora.db"
-registration = "invite_only"   # the first account can always register
+registration = "invite_only"   # subsequent accounts require invitations
 trust_proxy = true             # the proxy below terminates TLS
 ```
+
+## Initialize a new server
+
+An empty installation needs a one-use token before the first account can register. On the server,
+using the same configuration and the service account that owns the database, run:
+
+```sh
+sudo -u agora agora-server --config /etc/agora/agora.toml init-token
+```
+
+Enter the displayed token in the desktop registration screen's invitation code field within
+15 minutes. Treat it like a password. Running the command again invalidates the previous token.
+Once the first account is created, initialization cannot be repeated. Existing installations
+with accounts are marked initialized during migration and do not need a token. Back up the SQLite
+database before upgrading, and test the upgrade on a copy first.
 
 ## TLS with Caddy
 
