@@ -116,7 +116,12 @@ End-to-end encryption hides the text, not the rest:
 Per minute: sign-in and registration attempts per address (10), writes per account (120), reads
 per account (1200), typing notices (30); at most 16 WebSockets per account. All are in
 `agora.toml` (`[limits]`). Behind a proxy, set `trust_proxy = true` so the address comes from
-`X-Forwarded-For`; without a proxy that header is ignored.
+the last address in `X-Forwarded-For`; without a proxy that header is ignored. Limits are held in
+process memory and reset on restart; they are not shared between server processes. `trust_proxy`
+does not check the connecting peer: restrict access to the server port to a proxy you control,
+and configure that proxy to overwrite or safely append the header. Otherwise a direct client can
+forge its address and evade per-address limits. Check the complete proxy chain's header behavior;
+a tunnel alone does not make arbitrary direct connections to the server port trustworthy.
 
 ## Logs
 
