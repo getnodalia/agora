@@ -76,7 +76,9 @@ End-to-end encryption hides the text, not the rest:
 - **Session tokens** are 32 random bytes from the operating system (`OsRng`). The database keeps
   only their SHA-256; a stolen database cannot be used to sign in. Sessions expire
   (`session_days`, 30 by default), and **Log out** deletes the session and closes its WebSockets
-  at once.
+  at once. The client API can revoke an account's other sessions after password
+  reauthentication, preserving the current session. The server also requests closure of their
+  WebSockets; a socket rechecks its session periodically if immediate delivery fails.
 - **Invitation codes** are random too, stored as SHA-256, limited in uses and time.
   Registration with an invitation consumes it, creates the account and grants workspace
   membership in a single database transaction; a failure rolls all three back.

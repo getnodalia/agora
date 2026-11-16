@@ -739,3 +739,29 @@ async fn existing_database_migrates_without_resetting_accounts_or_sessions() {
     server.stop().await;
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn revoking_other_sessions_requires_password_and_preserves_other_users() {
+    let server = Server::start("sqlite::memory:").await;
+    let (owner, _) = register(&server, "owner").await;
+    let (other_owner, _) = server
+        .anonymous()
+        .login("owner", "owner-test-password")
+        .await
+        .unwrap();
+    let (stranger, _) = register(&server, "stranger").await;
+    let mut live = Live::open(&other_owner);
+    live.ready().await;
+    assert!(owner.revoke_other_sessions("wrong password").await.is_err());
+    assert!(other_owner.me().await.is_ok());
+    owner
+        .revoke_other_sessions("owner-test-password")
+        .await
+        .unwrap();
+    live.wait(|event| matches!(event, RealtimeEvent::AuthRejected).then_some(()))
+        .await;
+    assert!(other_owner.me().await.is_err());
+    assert!(owner.me().await.is_ok());
+    assert!(stranger.me().await.is_ok());
+    server.stop().await;
+}
