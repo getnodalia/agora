@@ -2,8 +2,8 @@
 //! conversation, edit a topic or a message, confirm a deletion, Preferences, About and the
 //! keyboard shortcuts. Each has the NDL heading with a round close button.
 
-use agora_core::{ChannelId, MessageId};
-use agora_protocol::Invite;
+use agora_core::{ChannelId, MessageId, WorkspaceId};
+use agora_protocol::{Invite, Task, TaskStatus};
 use egui::{vec2, Align, Id, Layout, RichText, TextEdit, Ui};
 use nodalia_theme::creator::{self as cr, layout, Look};
 use nodalia_theme::font_size;
@@ -48,6 +48,16 @@ pub enum Dialog {
     ConfirmDelete {
         id: MessageId,
     },
+    Tasks {
+        workspace: WorkspaceId,
+        generation: u64,
+        tasks: Vec<Task>,
+        title: String,
+        acknowledged: bool,
+        pending: bool,
+        loaded: bool,
+        has_more: bool,
+    },
     Preferences,
     About,
     Shortcuts,
@@ -72,6 +82,7 @@ impl Dialog {
             Dialog::Topic { .. } => tr("Topic"),
             Dialog::Edit { .. } => tr("Edit message"),
             Dialog::ConfirmDelete { .. } => tr("Delete this message?"),
+            Dialog::Tasks { .. } => tr("Tasks"),
             Dialog::Preferences => tr("Preferences"),
             Dialog::About => tr("About Ágora"),
             Dialog::Shortcuts => tr("Keyboard shortcuts"),
@@ -128,13 +139,13 @@ pub fn show(
     main.dialog = Some(dialog);
 }
 
-fn label(ui: &mut Ui, look: &Look, text: &str) {
+fn label(ui: &mut Ui, look: &Look, text: &str) -> egui::Response {
     ui.add_space(6.0);
     ui.label(
         RichText::new(text)
             .size(font_size::SMALL)
             .color(color(look.palette.text_secondary)),
-    );
+    )
 }
 
 fn field(ui: &mut Ui, look: &Look, text: &mut String, focus: bool) -> egui::Response {
@@ -178,6 +189,87 @@ fn body(
     let p = &look.palette;
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     match dialog {
+        Dialog::Tasks {
+            workspace,
+            tasks,
+            title,
+            acknowledged,
+            pending,
+            loaded,
+            has_more,
+            ..
+        } => {
+            ui.label(tr("Tasks are visible to the server and workspace members; they are not end-to-end encrypted."));
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for task in tasks.iter() {
+                        ui.group(|ui| {
+                            ui.label(RichText::new(&task.title).strong());
+                            let (label, action_label, next) = match task.status {
+                                TaskStatus::Todo => {
+                                    (tr("To do"), tr("Start task"), TaskStatus::InProgress)
+                                }
+                                TaskStatus::InProgress => {
+                                    (tr("In progress"), tr("Complete task"), TaskStatus::Done)
+                                }
+                                TaskStatus::Done => {
+                                    (tr("Done"), tr("Reopen task"), TaskStatus::Todo)
+                                }
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(label);
+                                if cr::secondary_button(ui, look, action_label, !*pending).clicked()
+                                {
+                                    actions.push(Action::ChangeTaskStatus(
+                                        *workspace,
+                                        task.clone(),
+                                        next,
+                                    ));
+                                }
+                            });
+                        });
+                    }
+                    if *has_more
+                        && cr::secondary_button(ui, look, tr("Load more"), !*pending).clicked()
+                    {
+                        let after = tasks.last().map_or(0, |task| task.id);
+                        actions.push(Action::LoadTasks(*workspace, after));
+                    }
+                    if *pending {
+                        ui.label(tr("Working…"));
+                    }
+                    if tasks.is_empty() && !*pending {
+                        ui.label(if *loaded {
+                            tr("No tasks yet.")
+                        } else {
+                            tr("Use Refresh to load tasks.")
+                        });
+                    }
+                });
+            let title_label = label(ui, look, tr("Task title"));
+            ui.add_enabled_ui(!*pending, |ui| {
+                field(ui, look, title, false).labelled_by(title_label.id);
+                ui.checkbox(acknowledged, tr("I understand who can read this task."));
+            });
+            let valid = !title.trim().is_empty()
+                && title.trim().chars().count() <= 200
+                && !title.trim().chars().any(char::is_control);
+            if cr::primary_button(
+                ui,
+                look,
+                tr("Create task"),
+                valid && *acknowledged && !*pending,
+            )
+            .clicked()
+            {
+                actions.push(Action::CreateTask(*workspace, title.trim().to_string()));
+            }
+            if cr::secondary_button(ui, look, tr("Refresh"), !*pending).clicked() {
+                actions.push(Action::LoadTasks(*workspace, 0));
+            }
+        }
         Dialog::CreateWorkspace { name } => {
             label(ui, look, tr("Workspace name"));
             field(ui, look, name, true);

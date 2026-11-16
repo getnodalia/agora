@@ -293,6 +293,12 @@ fn sidebar(ui: &mut Ui, main: &mut Main, look: &Look, actions: &mut Vec<Action>)
             let Some(ws) = main.model.current_workspace().cloned() else {
                 return;
             };
+            if ws.role != agora_core::Role::Guest
+                && cr::secondary_button(ui, look, tr("Tasks"), true).clicked()
+            {
+                actions.push(Action::OpenTasks);
+            }
+            ui.add_space(6.0);
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
