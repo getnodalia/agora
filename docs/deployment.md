@@ -113,3 +113,9 @@ ciphertext: store them as carefully as the server.
 
 Back up, then install the new release the way you installed the old one (`./install.sh` again,
 or the new package). Migrations run on start and only move forward.
+
+To check whether a newer stable release exists without changing the installation, run
+`agora-server check-updates`. This command queries the public GitHub releases API over HTTPS;
+it does not start the server, access the database, download an executable or install updates.
+It requires network access and can fail if GitHub is unreachable or rate-limits the request.
+Automatic installation is not yet implemented.

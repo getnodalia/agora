@@ -240,6 +240,8 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "rand 0.8.8",
+ "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",

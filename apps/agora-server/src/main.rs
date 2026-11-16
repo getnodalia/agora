@@ -6,13 +6,16 @@ use std::process::ExitCode;
 use agora_server::Config;
 use tracing_subscriber::EnvFilter;
 
+mod update_check;
+
 const HELP: &str = "agora-server: Ágora's self-hostable server
 
 USAGE:
-    agora-server [--config FILE] [init-token]
+    agora-server [--config FILE] [init-token | check-updates]
 
 OPTIONS:
     init-token          Create a one-use setup token, valid for 15 minutes
+    check-updates       Check the latest stable release (does not install it)
     -c, --config FILE   TOML configuration (see docs/deployment.md)
     -h, --help          Print this help
     -V, --version       Print the version
@@ -30,9 +33,11 @@ fn main() -> ExitCode {
     let mut config_path = std::env::var_os("AGORA_CONFIG").map(PathBuf::from);
     let mut args = std::env::args().skip(1);
     let mut init_token = false;
+    let mut check_updates = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "init-token" if !init_token => init_token = true,
+            "check-updates" if !check_updates => check_updates = true,
             "-h" | "--help" => {
                 print!("{HELP}");
                 return ExitCode::SUCCESS;
@@ -53,6 +58,31 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         }
+    }
+
+    if init_token && check_updates {
+        eprintln!("choose either init-token or check-updates");
+        return ExitCode::from(2);
+    }
+
+    if check_updates {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("agora-server: cannot start the runtime: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        return match runtime.block_on(update_check::check()) {
+            Ok(message) => {
+                println!("{message}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("agora-server: update check failed: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
 
     tracing_subscriber::fmt()
