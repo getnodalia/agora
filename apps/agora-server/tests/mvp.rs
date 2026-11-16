@@ -612,7 +612,13 @@ async fn simultaneous_registrations_cannot_share_one_invitation() {
     let (one, two) = tokio::join!(a.register(&first), b.register(&second));
     assert_ne!(one.is_ok(), two.is_ok());
     let loser = if one.is_err() { "alice" } else { "bruno" };
-    assert!(server.state.store.user_credentials(loser).await.unwrap().is_none());
+    assert!(server
+        .state
+        .store
+        .user_credentials(loser)
+        .await
+        .unwrap()
+        .is_none());
     assert_eq!(server.state.store.user_count().await.unwrap(), 2);
     server.stop().await;
     std::fs::remove_dir_all(dir).unwrap();
