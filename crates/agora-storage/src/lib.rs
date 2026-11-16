@@ -15,6 +15,7 @@ mod channels;
 pub mod messages;
 pub mod mls;
 mod rows;
+pub mod tasks;
 pub mod users;
 pub mod workspaces;
 
