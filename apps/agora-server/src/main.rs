@@ -11,11 +11,12 @@ mod update_check;
 const HELP: &str = "agora-server: Ágora's self-hostable server
 
 USAGE:
-    agora-server [--config FILE] [init-token | check-updates]
+    agora-server [--config FILE] [init-token | check-updates | backup FILE]
 
 OPTIONS:
     init-token          Create a one-use setup token, valid for 15 minutes
     check-updates       Check the latest stable release (does not install it)
+    backup FILE         Create a consistent SQLite snapshot at a new path
     -c, --config FILE   TOML configuration (see docs/deployment.md)
     -h, --help          Print this help
     -V, --version       Print the version
@@ -34,10 +35,18 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mut init_token = false;
     let mut check_updates = false;
+    let mut backup_path = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "init-token" if !init_token => init_token = true,
             "check-updates" if !check_updates => check_updates = true,
+            "backup" if backup_path.is_none() => match args.next() {
+                Some(p) => backup_path = Some(PathBuf::from(p)),
+                None => {
+                    eprintln!("backup needs a destination file");
+                    return ExitCode::from(2);
+                }
+            },
             "-h" | "--help" => {
                 print!("{HELP}");
                 return ExitCode::SUCCESS;
@@ -60,8 +69,8 @@ fn main() -> ExitCode {
         }
     }
 
-    if init_token && check_updates {
-        eprintln!("choose either init-token or check-updates");
+    if u8::from(init_token) + u8::from(check_updates) + u8::from(backup_path.is_some()) > 1 {
+        eprintln!("choose only one of init-token, check-updates or backup");
         return ExitCode::from(2);
     }
 
@@ -111,7 +120,15 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = if init_token {
+    let result: Result<(), Box<dyn std::error::Error>> = if let Some(path) = backup_path {
+        match runtime.block_on(agora_storage::backup::create(&config.database, &path)) {
+            Ok(()) => {
+                println!("Backup created: {}", path.display());
+                Ok(())
+            }
+            Err(e) => Err(Box::new(e)),
+        }
+    } else if init_token {
         runtime.block_on(create_init_token(config))
     } else {
         runtime.block_on(run(config))

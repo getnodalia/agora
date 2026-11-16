@@ -11,6 +11,7 @@
 //! client nonce, unique channel names, counters updated in the same transaction as the rows.
 
 mod channels;
+pub mod backup;
 pub mod messages;
 pub mod mls;
 mod rows;
