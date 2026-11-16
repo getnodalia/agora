@@ -579,3 +579,41 @@ async fn wrong_passwords_are_refused_and_rate_limited() {
     );
     state.store.close().await;
 }
+
+#[tokio::test]
+async fn simultaneous_registrations_cannot_share_one_invitation() {
+    let (dir, database) = temp_db("invite-race");
+    let mut config = invite_only();
+    config.database = database;
+    let server = Server::start_with(config, 0).await;
+    let (owner, _) = register(&server, "owner").await;
+    let ws = owner.create_workspace("Lab").await.unwrap();
+    let invite = owner
+        .create_invite(
+            ws.id,
+            &CreateInviteRequest {
+                max_uses: Some(1),
+                expires_in_hours: Some(1),
+                role: Some(agora_core::Role::Member),
+            },
+        )
+        .await
+        .unwrap();
+    let request = |name: &str| agora_protocol::RegisterRequest {
+        username: name.into(),
+        display_name: name.into(),
+        password: "a sufficiently long password".into(),
+        invite_code: Some(invite.code.clone()),
+    };
+    let a = server.anonymous();
+    let b = server.anonymous();
+    let first = request("alice");
+    let second = request("bruno");
+    let (one, two) = tokio::join!(a.register(&first), b.register(&second));
+    assert_ne!(one.is_ok(), two.is_ok());
+    let loser = if one.is_err() { "alice" } else { "bruno" };
+    assert!(server.state.store.user_credentials(loser).await.unwrap().is_none());
+    assert_eq!(server.state.store.user_count().await.unwrap(), 2);
+    server.stop().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
