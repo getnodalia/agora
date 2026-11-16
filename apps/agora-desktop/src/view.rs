@@ -655,7 +655,6 @@ fn conversation(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &m
                     );
                 }
                 ui.vertical(|ui| {
-                    ui.add_space(8.0);
                     let title = if direct {
                         peer_name(&channel)
                     } else {
@@ -872,6 +871,21 @@ fn message_list(
     }
 }
 
+/// Keep the text column fixed even when a consecutive message has no avatar.
+fn message_gutter(ui: &mut Ui, grouped: bool, draw_avatar: impl FnOnce(&mut Ui)) {
+    ui.allocate_ui_with_layout(
+        vec2(36.0, if grouped { 18.0 } else { 36.0 }),
+        Layout::top_down(Align::Min),
+        |ui| {
+            if grouped {
+                ui.allocate_exact_size(vec2(36.0, 18.0), egui::Sense::hover());
+            } else {
+                draw_avatar(ui);
+            }
+        },
+    );
+}
+
 fn message_item(
     ui: &mut Ui,
     main: &mut Main,
@@ -888,22 +902,16 @@ fn message_item(
     ui.add_space(if grouped { 1.0 } else { 8.0 });
     ui.horizontal(|ui| {
         ui.add_space(16.0);
-        ui.allocate_ui_with_layout(
-            vec2(36.0, if grouped { 18.0 } else { 36.0 }),
-            Layout::top_down(Align::Min),
-            |ui| {
-                if !grouped {
-                    avatar(
-                        ui,
-                        look,
-                        message.author.id.0,
-                        &message.author.display_name,
-                        36.0,
-                        None,
-                    );
-                }
-            },
-        );
+        message_gutter(ui, grouped, |ui| {
+            avatar(
+                ui,
+                look,
+                message.author.id.0,
+                &message.author.display_name,
+                36.0,
+                None,
+            );
+        });
         ui.add_space(10.0);
         ui.vertical(|ui| {
             ui.set_max_width(ui.available_width() - 16.0);
@@ -1702,4 +1710,28 @@ pub fn date(at: Timestamp) -> String {
     local(at)
         .map(|t| t.format("%d/%m/%Y").to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouped_messages_keep_the_same_text_column() {
+        let ctx = egui::Context::default();
+        let mut positions = Vec::new();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for grouped in [false, true] {
+                ui.horizontal(|ui| {
+                    message_gutter(ui, grouped, |ui| {
+                        ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::hover());
+                    });
+                    ui.add_space(10.0);
+                    positions.push(ui.cursor().min.x);
+                });
+            }
+        });
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions.first(), positions.last());
+    }
 }
