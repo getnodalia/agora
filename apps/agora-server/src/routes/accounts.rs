@@ -68,12 +68,15 @@ pub async fn register(
         .map(str::trim)
         .filter(|c| !c.is_empty());
 
-    // The very first account can always be created, so a fresh invite-only server can be set up.
     let first = state.store.user_count().await? == 0;
-    let allowed = match state.config.registration {
-        RegistrationPolicy::Open => true,
-        RegistrationPolicy::InviteOnly => invite.is_some() || first,
-        RegistrationPolicy::Closed => first,
+    let allowed = if first {
+        invite.is_some()
+    } else {
+        match state.config.registration {
+            RegistrationPolicy::Open => true,
+            RegistrationPolicy::InviteOnly => invite.is_some(),
+            RegistrationPolicy::Closed => false,
+        }
     };
     if !allowed {
         return Err(AppError::new(
@@ -82,25 +85,37 @@ pub async fn register(
             "this server only accepts new accounts with an invitation",
         ));
     }
-    // Check the invitation before creating anything, so a bad code leaves no orphan account.
     let invite_hash = invite.map(auth::token_hash);
-    if let Some(hash) = &invite_hash {
-        if !state.store.invite_usable(hash, now_ms()).await? {
-            return Err(AppError::new(
-                StatusCode::GONE,
-                ErrorCode::NotFound,
-                "this invitation is not valid, has expired or has been used up",
-            ));
-        }
-    }
-
     let hash = auth::hash_password(req.password).await?;
-    let user = match state
-        .store
-        .create_user(&username, &display_name, &hash, now_ms())
-        .await
-    {
-        Ok(u) => u,
+    let created = if first {
+        // Every path rechecks initialization under a SQLite write lock after hashing.
+        let token_hash = invite_hash.as_deref().ok_or_else(|| {
+            AppError::new(
+                StatusCode::FORBIDDEN,
+                ErrorCode::RegistrationClosed,
+                "a server initialization token is required",
+            )
+        })?;
+        state
+            .store
+            .initialize_user(&username, &display_name, &hash, token_hash, now_ms())
+            .await
+            .map(|user| (user, None))
+    } else if let Some(invite_hash) = &invite_hash {
+        state
+            .store
+            .create_invited_user(&username, &display_name, &hash, invite_hash, now_ms())
+            .await
+            .map(|(user, joined)| (user, Some(joined)))
+    } else {
+        state
+            .store
+            .create_user(&username, &display_name, &hash, now_ms())
+            .await
+            .map(|user| (user, None))
+    };
+    let (user, joined) = match created {
+        Ok(result) => result,
         Err(StoreError::Conflict) => {
             let mut e = AppError::conflict("that username is taken");
             e.body.field = Some("username".into());
@@ -108,10 +123,10 @@ pub async fn register(
         }
         Err(e) => return Err(e.into()),
     };
-    if let Some(hash) = invite_hash {
-        // Another person may have used the last place in between; the account still stands.
-        if let Err(e) = super::workspaces::redeem(&state, &hash, &user).await {
-            tracing::info!(status = %e.status, "invitation could not be used at registration");
+    if let Some(joined) = joined {
+        // Notification failure must not report that a committed registration failed.
+        if let Err(e) = super::workspaces::notify_joined(&state, &user, joined).await {
+            tracing::warn!(status = %e.status, "could not notify workspace of registration");
         }
     }
     tracing::info!(user = %user.id, "account created");

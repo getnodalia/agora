@@ -34,6 +34,8 @@ pub enum StoreError {
     NotFound,
     #[error("invitation is expired or used up")]
     InviteExhausted,
+    #[error("server initialization is not authorized or already completed")]
+    InitializationDenied,
     #[error("the conversation's encryption epoch moved on")]
     StaleEpoch,
     #[error("database error: {0}")]

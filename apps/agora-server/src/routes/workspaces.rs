@@ -138,6 +138,20 @@ pub async fn redeem(state: &AppState, code_hash: &[u8], user: &User) -> AppResul
         .store
         .redeem_invite(code_hash, user.id, now_ms())
         .await?;
+    notify_joined(state, user, joined).await?;
+    state
+        .store
+        .workspace(joined.workspace_id, user.id)
+        .await?
+        .ok_or_else(AppError::internal)
+}
+
+/// Notify existing workspace members after a committed join.
+pub async fn notify_joined(
+    state: &AppState,
+    user: &User,
+    joined: agora_storage::workspaces::Joined,
+) -> AppResult<()> {
     if joined.new_member {
         if state.store.member_count(joined.workspace_id).await?
             > i64::from(limits::WORKSPACE_MEMBERS_MAX)
@@ -162,11 +176,7 @@ pub async fn redeem(state: &AppState, code_hash: &[u8], user: &User) -> AppResul
             },
         );
     }
-    state
-        .store
-        .workspace(joined.workspace_id, user.id)
-        .await?
-        .ok_or_else(AppError::internal)
+    Ok(())
 }
 
 pub async fn join(

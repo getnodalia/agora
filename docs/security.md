@@ -80,6 +80,8 @@ End-to-end encryption hides the text, not the rest:
   reauthentication, preserving the current session. The server also requests closure of their
   WebSockets; a socket rechecks its session periodically if immediate delivery fails.
 - **Invitation codes** are random too, stored as SHA-256, limited in uses and time.
+  Registration with an invitation consumes it, creates the account and grants workspace
+  membership in a single database transaction; a failure rolls all three back.
 - The desktop app keeps a session only when "Keep me signed in" is ticked, in `session.json` in
   its config folder, created with mode `0600` on Unix and written atomically. Log out deletes it.
 

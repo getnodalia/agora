@@ -14,7 +14,7 @@ bind = "127.0.0.1:7878"
 database = "sqlite://agora.db"
 
 # Who may create an account: "open", "invite_only" or "closed".
-# The first account on a server can always register.
+# A new server requires an initialization token for the first account.
 registration = "open"
 
 # Days a session lasts after signing in.

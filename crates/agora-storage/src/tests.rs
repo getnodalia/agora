@@ -380,3 +380,53 @@ async fn the_encrypted_log_moves_one_epoch_at_a_time() {
     assert_eq!(log.len(), 2);
     assert!(log[0].data.is_empty());
 }
+
+#[tokio::test]
+async fn invited_registration_is_atomic() {
+    use crate::workspaces::NewInvite;
+    let s = store().await;
+    let owner = s.create_user("owner", "Owner", "h", 1).await.unwrap();
+    let ws = s.create_workspace("Lab", owner.id, 1).await.unwrap();
+    s.create_invite(NewInvite {
+        workspace: ws,
+        code_hash: b"single-use",
+        role: Role::Member,
+        by: owner.id,
+        max_uses: 1,
+        expires_at: 100,
+        now: 1,
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        s.create_invited_user("expired", "Expired", "h", b"single-use", 100)
+            .await,
+        Err(StoreError::InviteExhausted)
+    ));
+    assert!(s.user_credentials("expired").await.unwrap().is_none());
+    // A duplicate username must not consume the only use.
+    assert!(matches!(
+        s.create_invited_user("owner", "Other", "h", b"single-use", 2)
+            .await,
+        Err(StoreError::Conflict)
+    ));
+    let (user, joined) = s
+        .create_invited_user("new", "New", "h", b"single-use", 2)
+        .await
+        .unwrap();
+    assert_eq!(joined.workspace_id, ws);
+    assert_eq!(s.role(ws, user.id).await.unwrap(), Some(Role::Member));
+    assert!(s.channels_for(ws, user.id, Role::Member).await.unwrap()[0].joined);
+    assert!(matches!(
+        s.create_invited_user("late", "Late", "h", b"single-use", 3)
+            .await,
+        Err(StoreError::InviteExhausted)
+    ));
+    assert!(s.user_credentials("late").await.unwrap().is_none());
+    assert!(matches!(
+        s.create_invited_user("unknown", "Unknown", "h", b"unknown", 3)
+            .await,
+        Err(StoreError::InviteExhausted)
+    ));
+    assert!(s.user_credentials("unknown").await.unwrap().is_none());
+}
