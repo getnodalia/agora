@@ -1720,7 +1720,7 @@ mod tests {
     fn grouped_messages_keep_the_same_text_column() {
         let ctx = egui::Context::default();
         let mut positions = Vec::new();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             for grouped in [false, true] {
                 ui.horizontal(|ui| {
                     message_gutter(ui, grouped, |ui| {
@@ -1731,6 +1731,7 @@ mod tests {
                 });
             }
         });
+        output.textures_delta.clear();
         assert_eq!(positions.len(), 2);
         assert_eq!(positions.first(), positions.last());
     }
