@@ -79,5 +79,11 @@ access. For an organization workspace, only the organization owner can issue wor
 redeeming one adds the invitee to the organization as a member or guest without overwriting an
 existing organization role. Existing standalone workspaces remain standalone after migration.
 
-This is an API foundation: the desktop organization interface, workspace role management, member
-removal, ownership transfer and moving existing workspaces into an organization are not implemented.
+The desktop Organizations dialog can create organizations and their workspaces, select an accessible
+workspace and change the organization role of an existing organization member. Invitations to an
+organization workspace add the invitee to the organization as described above. Workspace role
+management, member removal, ownership transfer and moving existing workspaces into an organization
+are not implemented.
+
+In this initial implementation only the owner has organization-management privileges; admin, member
+and guest organization roles do not yet differ in their organization-level permissions.
