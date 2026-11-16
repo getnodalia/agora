@@ -10,6 +10,7 @@
 //! `agora_core::roles` before it calls here. The store does guarantee integrity: one message per
 //! client nonce, unique channel names, counters updated in the same transaction as the rows.
 
+pub mod backup;
 mod channels;
 pub mod messages;
 pub mod mls;

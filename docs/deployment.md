@@ -109,7 +109,23 @@ sqlite3 /var/lib/agora/agora.db ".backup /var/backups/agora-$(date +%F).db"
 Backups hold accounts, metadata (who talks in which conversation, and when) and the messages'
 ciphertext: store them as carefully as the server.
 
+The server can also create a consistent snapshot without a separate SQLite program. Use a
+private directory writable by the service account; the destination must not already exist:
+
+```sh
+sudo -u agora agora-server --config /etc/agora/agora.toml backup /var/lib/agora/backup.db
+```
+
+The command checks the copy's integrity and does not apply migrations to the source. The copy
+contains sensitive data and needs independent protection and a tested restore procedure.
+
 ## Upgrading
 
 Back up, then install the new release the way you installed the old one (`./install.sh` again,
 or the new package). Migrations run on start and only move forward.
+
+To check whether a newer stable release exists without changing the installation, run
+`agora-server check-updates`. This command queries the public GitHub releases API over HTTPS;
+it does not start the server, access the database, download an executable or install updates.
+It requires network access and can fail if GitHub is unreachable or rate-limits the request.
+Automatic installation is not yet implemented.
