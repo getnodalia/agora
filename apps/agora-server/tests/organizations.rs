@@ -72,6 +72,26 @@ async fn company_roles_and_workspace_access_are_separate() {
     assert!(!all.iter().any(|w| w.id == old.id));
     let member_url = format!("{base}/members/{}", member_user.id);
     assert_eq!(
+        http.get(format!("{base}/members"))
+            .bearer_auth(outsider.token().unwrap())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        http.put(&member_url)
+            .bearer_auth(outsider.token().unwrap())
+            .json(&SetOrganizationMemberRequest { role: Role::Admin })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    assert_eq!(
         http.put(&member_url)
             .bearer_auth(owner.token().unwrap())
             .json(&SetOrganizationMemberRequest { role: Role::Admin })
