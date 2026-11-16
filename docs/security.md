@@ -130,3 +130,14 @@ terms; keep production at `info` (the default).
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end
   encryption".
+
+## Organizations
+
+The experimental organization API separates organization membership from workspace and channel
+permissions. Membership in an organization alone does not grant access to its workspaces; workspace
+and channel membership checks remain in force. Only the organization owner can add or change
+organization roles, create its workspaces or issue invitations to them. An invitation to a company
+workspace also admits the invitee to that organization; it does not change an existing organization
+role. Roles at the two levels are independent, and changing an organization role does not revoke
+access already granted in a workspace. Removing members and transferring ownership are not yet
+implemented. Organization names and roles are server-readable metadata, not MLS messages.

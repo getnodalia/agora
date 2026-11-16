@@ -5,6 +5,7 @@ pub mod accounts;
 pub mod channels;
 pub mod e2e;
 pub mod messages;
+pub mod organizations;
 pub mod workspaces;
 
 use std::net::{IpAddr, SocketAddr};
@@ -31,6 +32,19 @@ pub fn router() -> Router<AppState> {
         .route("/me", get(accounts::me).patch(accounts::update_me))
         .route("/devices/me", put(e2e::register_device))
         .route("/devices/me/key_packages", post(e2e::publish_key_packages))
+        .route(
+            "/organizations",
+            get(organizations::list).post(organizations::create),
+        )
+        .route("/organizations/{id}/members", get(organizations::members))
+        .route(
+            "/organizations/{id}/members/{user}",
+            put(organizations::set_member),
+        )
+        .route(
+            "/organizations/{id}/workspaces",
+            get(organizations::workspaces).post(organizations::create_workspace),
+        )
         .route(
             "/workspaces",
             get(workspaces::list).post(workspaces::create),

@@ -65,3 +65,19 @@ Server events: `ready {user}`, `error {code, message}`, `message_created`, `mess
 Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last
 message it has, which is how nothing is lost while it was away.
+
+### Organizations (experimental API)
+
+`POST /organizations` creates an organization and makes its creator its owner; `GET /organizations`
+lists those the caller belongs to. The owner alone may list organization members, assign an existing
+account a non-owner organization role with `PUT /organizations/{id}/members/{user}`, and create a
+workspace with `POST /organizations/{id}/workspaces`. The owner role cannot be reassigned through
+this API. `GET /organizations/{id}/workspaces` returns only workspaces the caller already belongs to;
+organization membership alone never grants access to a workspace or its channels. Organization and
+workspace roles are independent: changing one does not change the other or revoke existing workspace
+access. For an organization workspace, only the organization owner can issue workspace invitations;
+redeeming one adds the invitee to the organization as a member or guest without overwriting an
+existing organization role. Existing standalone workspaces remain standalone after migration.
+
+This is an API foundation: the desktop organization interface, workspace role management, member
+removal, ownership transfer and moving existing workspaces into an organization are not implemented.

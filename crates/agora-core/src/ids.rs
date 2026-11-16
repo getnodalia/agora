@@ -40,3 +40,8 @@ id!(
     /// An invitation to a workspace.
     InviteId
 );
+
+id!(
+    /// A company or organization, which may contain several workspaces.
+    OrganizationId
+);

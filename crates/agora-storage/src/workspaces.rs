@@ -323,6 +323,10 @@ async fn add_member(
         .execute(&mut **tx)
         .await
         .map_err(crate::conflict)?;
+    // A company workspace invitation also admits the invitee to the company, without
+    // changing any existing company role. Only the company owner can issue these invites.
+    sqlx::query("INSERT OR IGNORE INTO organization_members (organization_id, user_id, role, joined_at) SELECT organization_id, ?, ?, ? FROM workspaces WHERE id = ? AND organization_id IS NOT NULL")
+        .bind(user.0).bind(if role == Role::Guest { "guest" } else { "member" }).bind(now).bind(workspace.0).execute(&mut **tx).await?;
     // Members (not guests) land in the default channels, read up to now.
     if role != Role::Guest {
         sqlx::query(

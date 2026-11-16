@@ -7,7 +7,7 @@
 pub mod realtime;
 pub mod secure;
 
-use agora_core::{ChannelId, MessageId, UserId, WorkspaceId};
+use agora_core::{ChannelId, MessageId, OrganizationId, UserId, WorkspaceId};
 use agora_protocol::*;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
@@ -234,6 +234,53 @@ impl Client {
             display_name: display_name.to_owned(),
         };
         self.send(Method::PATCH, self.url("/me")?, Some(&req)).await
+    }
+
+    // Organizations --------------------------------------------------------------------------
+
+    pub async fn organizations(&self) -> Result<Vec<Organization>> {
+        self.get("/organizations").await
+    }
+    pub async fn create_organization(&self, name: &str) -> Result<Organization> {
+        self.post(
+            "/organizations",
+            &CreateOrganizationRequest {
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+    pub async fn organization_workspaces(&self, org: OrganizationId) -> Result<Vec<Workspace>> {
+        self.get(&format!("/organizations/{org}/workspaces")).await
+    }
+    pub async fn create_organization_workspace(
+        &self,
+        org: OrganizationId,
+        name: &str,
+    ) -> Result<Workspace> {
+        self.post(
+            &format!("/organizations/{org}/workspaces"),
+            &CreateWorkspaceRequest {
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+    pub async fn organization_members(&self, org: OrganizationId) -> Result<Vec<Member>> {
+        self.get(&format!("/organizations/{org}/members")).await
+    }
+    pub async fn set_organization_member(
+        &self,
+        org: OrganizationId,
+        user: UserId,
+        role: agora_core::Role,
+    ) -> Result<()> {
+        self.send(
+            Method::PUT,
+            self.url(&format!("/organizations/{org}/members/{user}"))?,
+            Some(&SetOrganizationMemberRequest { role }),
+        )
+        .await
     }
 
     // Workspaces ------------------------------------------------------------------------------

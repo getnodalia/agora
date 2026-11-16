@@ -90,6 +90,13 @@ pub async fn create_invite(
             "only owners and admins can invite people",
         ));
     }
+    if let Some(owner) = state.store.workspace_organization_owner(ws).await? {
+        if owner != auth.user.id {
+            return Err(AppError::forbidden(
+                "only the organization owner can invite people to its workspaces",
+            ));
+        }
+    }
     super::check_write(&state, auth.user.id)?;
     let max_uses = req.max_uses.unwrap_or(1);
     let hours = req.expires_in_hours.unwrap_or(168);

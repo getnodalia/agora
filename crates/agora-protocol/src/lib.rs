@@ -6,7 +6,9 @@
 //! `#[serde(default)]`, never rename or remove them within a version. `docs/protocol.md`
 //! describes each endpoint.
 
-use agora_core::{ChannelId, ChannelKind, InviteId, MessageId, Role, UserId, WorkspaceId};
+use agora_core::{
+    ChannelId, ChannelKind, InviteId, MessageId, OrganizationId, Role, UserId, WorkspaceId,
+};
 use serde::{Deserialize, Serialize};
 
 /// The API version this crate describes.
@@ -121,6 +123,27 @@ pub struct SessionResponse {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UpdateProfileRequest {
     pub display_name: String,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Organizations
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Organization {
+    pub id: OrganizationId,
+    pub name: String,
+    pub role: Role,
+    pub created_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateOrganizationRequest {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetOrganizationMemberRequest {
+    pub role: Role,
 }
 
 // ---------------------------------------------------------------------------------------------
