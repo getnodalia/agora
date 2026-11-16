@@ -66,7 +66,10 @@ fn main() -> ExitCode {
     }
 
     if check_updates {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("agora-server: cannot start the runtime: {e}");
