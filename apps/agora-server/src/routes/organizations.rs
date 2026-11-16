@@ -68,7 +68,11 @@ pub async fn members(
 ) -> AppResult<Json<Vec<Member>>> {
     let org = OrganizationId(id);
     owner(&state, org, auth.user.id).await?;
-    Ok(Json(state.store.organization_members(org).await?))
+    let mut members = state.store.organization_members(org).await?;
+    for member in &mut members {
+        member.online = state.hub.is_online(member.user.id);
+    }
+    Ok(Json(members))
 }
 pub async fn set_member(
     State(state): State<AppState>,
