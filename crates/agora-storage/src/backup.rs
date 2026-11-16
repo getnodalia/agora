@@ -7,8 +7,8 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
+use sqlx::Connection;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
@@ -99,15 +99,22 @@ mod tests {
             .unwrap();
         let url = format!("sqlite://{}", database.display());
         create(&url, &backup).await.unwrap();
-        let mut copy = SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&backup).read_only(true))
-            .await
-            .unwrap();
+        let mut copy = SqliteConnection::connect_with(
+            &SqliteConnectOptions::new()
+                .filename(&backup)
+                .read_only(true),
+        )
+        .await
+        .unwrap();
         let value: String = sqlx::query_scalar("SELECT value FROM test")
             .fetch_one(&mut copy)
             .await
             .unwrap();
         assert_eq!(value, "saved");
-        assert!(matches!(create(&url, &backup).await, Err(BackupError::File(_))));
+        assert!(matches!(
+            create(&url, &backup).await,
+            Err(BackupError::File(_))
+        ));
         copy.close().await.unwrap();
         live.close().await.unwrap();
     }
@@ -117,7 +124,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing.db");
         let backup = dir.path().join("backup.db");
-        assert!(create(&format!("sqlite://{}", missing.display()), &backup).await.is_err());
+        assert!(create(&format!("sqlite://{}", missing.display()), &backup)
+            .await
+            .is_err());
         assert!(!missing.exists());
         assert!(!backup.exists());
     }
