@@ -136,8 +136,10 @@ cargo run --release -p agora-server
 cargo run --release -p agora-desktop
 ```
 
-On the sign-in screen, the server is `localhost:7878`. The first account created on a server can
-always register; it becomes the owner of the workspaces it creates. Copy
+On a fresh server, run `cargo run --release -p agora-server -- init-token` using the same
+configuration and database as the running server. Enter the one-use token in the invitation
+code field when creating the first account. It expires after 15 minutes. On the sign-in screen,
+the server is `localhost:7878`. The account owns the workspaces it creates. Copy
 [`agora.example.toml`](agora.example.toml) to set the address, the database, who may register and
 the limits, and start the server with `agora-server --config agora.toml`.
 
