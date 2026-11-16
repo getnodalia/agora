@@ -90,11 +90,17 @@ pub async fn register(
     let created = if first {
         // Every path rechecks initialization under a SQLite write lock after hashing.
         let token_hash = invite_hash.as_deref().ok_or_else(|| {
-            AppError::new(StatusCode::FORBIDDEN, ErrorCode::RegistrationClosed,
-                "a server initialization token is required")
+            AppError::new(
+                StatusCode::FORBIDDEN,
+                ErrorCode::RegistrationClosed,
+                "a server initialization token is required",
+            )
         })?;
-        state.store.initialize_user(&username, &display_name, &hash, token_hash, now_ms())
-            .await.map(|user| (user, None))
+        state
+            .store
+            .initialize_user(&username, &display_name, &hash, token_hash, now_ms())
+            .await
+            .map(|user| (user, None))
     } else if let Some(invite_hash) = &invite_hash {
         state
             .store

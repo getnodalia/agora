@@ -95,10 +95,15 @@ pub fn temp_db(name: &str) -> (std::path::PathBuf, String) {
 pub async fn register(server: &Server, username: &str) -> (Client, User) {
     let token = if server.state.store.user_count().await.unwrap() == 0 {
         let token = agora_server::auth::random_token(32);
-        server.state.store.set_initialization_token(
-            &agora_server::auth::token_hash(&token),
-            agora_server::auth::now_ms() + 900_000,
-        ).await.unwrap();
+        server
+            .state
+            .store
+            .set_initialization_token(
+                &agora_server::auth::token_hash(&token),
+                agora_server::auth::now_ms() + 900_000,
+            )
+            .await
+            .unwrap();
         Some(token)
     } else {
         None
