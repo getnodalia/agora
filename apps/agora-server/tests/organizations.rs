@@ -54,16 +54,8 @@ async fn company_roles_and_workspace_access_are_separate() {
         .json()
         .await
         .unwrap();
-    let second: Workspace = http
-        .post(&ws_url)
-        .bearer_auth(owner.token().unwrap())
-        .json(&CreateWorkspaceRequest {
-            name: "Research".into(),
-        })
-        .send()
-        .await
-        .unwrap()
-        .json()
+    let second = owner
+        .create_organization_workspace(org.id, "Research")
         .await
         .unwrap();
     assert_eq!(owner.organizations().await.unwrap(), vec![org.clone()]);
@@ -91,16 +83,16 @@ async fn company_roles_and_workspace_access_are_separate() {
         StatusCode::NOT_FOUND
     );
 
-    assert_eq!(
-        http.put(&member_url)
-            .bearer_auth(owner.token().unwrap())
-            .json(&SetOrganizationMemberRequest { role: Role::Admin })
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::NO_CONTENT
-    );
+    owner
+        .set_organization_member(org.id, member_user.id, Role::Admin)
+        .await
+        .unwrap();
+    assert!(owner
+        .organization_members(org.id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|member| member.user.id == member_user.id && member.role == Role::Admin));
     let all: Vec<Workspace> = http
         .get(&ws_url)
         .bearer_auth(member.token().unwrap())
