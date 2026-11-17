@@ -4,6 +4,7 @@
 pub mod accounts;
 pub mod channels;
 pub mod e2e;
+pub mod github;
 pub mod messages;
 pub mod organizations;
 pub mod tasks;
@@ -24,6 +25,10 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/server", get(accounts::server_info))
+        .route(
+            "/integrations/github/webhook",
+            post(github::receive).layer(DefaultBodyLimit::max(1024 * 1024)),
+        )
         .route("/auth/register", post(accounts::register))
         .route("/auth/login", post(accounts::login))
         .route("/auth/logout", post(accounts::logout))
@@ -61,6 +66,10 @@ pub fn router() -> Router<AppState> {
                 .layer(DefaultBodyLimit::max(workspaces::ICON_MAX_BYTES)),
         )
         .route("/workspaces/{id}/members", get(workspaces::members))
+        .route(
+            "/workspaces/{id}/integrations/github/events",
+            get(github::events),
+        )
         .route("/workspaces/{id}/invites", post(workspaces::create_invite))
         .route(
             "/workspaces/{id}/channels",

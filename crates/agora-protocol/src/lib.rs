@@ -204,6 +204,16 @@ pub struct UpdateTaskRequest {
 // ---------------------------------------------------------------------------------------------
 // Workspaces
 
+/// A GitHub event's server-readable metadata, separate from end-to-end encrypted messages.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GitHubEvent {
+    pub id: i64,
+    pub event: String,
+    pub action: Option<String>,
+    pub object_number: Option<i64>,
+    pub received_at: Timestamp,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: WorkspaceId,
