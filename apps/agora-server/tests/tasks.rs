@@ -1,153 +1,64 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod common;
-use agora_protocol::{
-    CreateInviteRequest, CreateTaskRequest, Task, TaskPriority, TaskStatus, UpdateTaskRequest,
-};
+use agora_protocol::{CreateTaskRequest, TaskPriority};
 use common::*;
 use reqwest::StatusCode;
 
 #[tokio::test]
-async fn tasks_are_workspace_scoped_persistent_and_conflict_safe() {
-    let (dir, db) = temp_db("tasks");
+async fn plaintext_task_routes_are_unavailable_and_existing_data_survives() {
+    let (dir, db) = temp_db("disabled-tasks");
     let server = Server::start(&db).await;
-    let (ana, _) = register(&server, "ana").await;
-    let (outsider, outsider_user) = register(&server, "outsider").await;
-    let ws = ana.create_workspace("Research").await.unwrap();
-    let invite = ana
-        .create_invite(
-            ws.id,
-            &CreateInviteRequest {
-                max_uses: None,
-                expires_in_hours: None,
-                role: None,
-            },
-        )
+    let (owner, user) = register(&server, "owner").await;
+    let workspace = owner.create_workspace("Research").await.unwrap();
+    let token = owner.token().unwrap().to_owned();
+    let task = CreateTaskRequest {
+        title: "Existing task".into(),
+        priority: TaskPriority::Normal,
+        assignee_id: None,
+        due_at: None,
+        acknowledge_server_readable: true,
+    };
+    // Seed an existing row as a previous installation would have stored it.
+    let stored = server
+        .state
+        .store
+        .create_task(workspace.id, user.id, &task, 1)
         .await
         .unwrap();
-    let (member, member_user) = register(&server, "member").await;
-    member.join_workspace(&invite.code).await.unwrap();
-    let guest_invite = ana
-        .create_invite(
-            ws.id,
-            &CreateInviteRequest {
-                max_uses: None,
-                expires_in_hours: None,
-                role: Some(agora_core::Role::Guest),
-            },
-        )
-        .await
-        .unwrap();
-    let (guest, _) = register(&server, "guest").await;
-    guest.join_workspace(&guest_invite.code).await.unwrap();
-    let token = ana.token().unwrap().to_string();
+    let url = format!("{}/api/v1/workspaces/{}/tasks", server.url, workspace.id);
     let http = reqwest::Client::new();
-    let url = format!("{}/api/v1/workspaces/{}/tasks", server.url, ws.id);
     assert_eq!(
         http.get(&url)
-            .bearer_auth(guest.token().unwrap())
+            .bearer_auth(&token)
             .send()
             .await
             .unwrap()
             .status(),
         StatusCode::NOT_FOUND
     );
-    let mut req = CreateTaskRequest {
-        title: "Review experiment".into(),
-        priority: TaskPriority::High,
-        assignee_id: Some(member_user.id),
-        due_at: Some(1_800_000_000_000),
-        acknowledge_server_readable: false,
-    };
     assert_eq!(
         http.post(&url)
             .bearer_auth(&token)
-            .json(&req)
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::BAD_REQUEST
-    );
-    req.acknowledge_server_readable = true;
-    assert_eq!(
-        http.post(&url)
-            .bearer_auth(outsider.token().unwrap())
-            .json(&req)
+            .json(&task)
             .send()
             .await
             .unwrap()
             .status(),
         StatusCode::NOT_FOUND
     );
-    req.assignee_id = Some(outsider_user.id);
     assert_eq!(
-        http.post(&url)
+        http.put(format!("{url}/{}", stored.id))
             .bearer_auth(&token)
-            .json(&req)
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::BAD_REQUEST
-    );
-    req.assignee_id = Some(member_user.id);
-    assert_eq!(
-        http.post(&url)
-            .bearer_auth(guest.token().unwrap())
-            .json(&req)
+            .json(&task)
             .send()
             .await
             .unwrap()
             .status(),
         StatusCode::NOT_FOUND
     );
-    let res = http
-        .post(&url)
-        .bearer_auth(&token)
-        .json(&req)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::CREATED);
-    let task: Task = res.json().await.unwrap();
-    assert_eq!(task.assignee_id, Some(member_user.id));
-    let update = UpdateTaskRequest {
-        title: task.title.clone(),
-        status: TaskStatus::InProgress,
-        priority: TaskPriority::High,
-        assignee_id: task.assignee_id,
-        due_at: task.due_at,
-        revision: task.revision,
-    };
-    let task_url = format!("{url}/{}", task.id);
-    let res = http
-        .put(&task_url)
-        .bearer_auth(member.token().unwrap())
-        .json(&update)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let changed: Task = res.json().await.unwrap();
-    assert_eq!(changed.revision, 2);
     assert_eq!(
-        http.put(&task_url)
-            .bearer_auth(&token)
-            .json(&update)
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::CONFLICT
-    );
-    assert_eq!(
-        http.get(&url)
-            .bearer_auth(outsider.token().unwrap())
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::NOT_FOUND
+        server.state.store.tasks(workspace.id, 0).await.unwrap(),
+        vec![stored.clone()]
     );
     let port = server.port();
     server.stop().await;
@@ -159,16 +70,19 @@ async fn tasks_are_workspace_scoped_persistent_and_conflict_safe() {
         port,
     )
     .await;
-    let tasks: Vec<Task> = http
-        .get(&url)
-        .bearer_auth(&token)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(tasks, vec![changed]);
+    assert_eq!(
+        server.state.store.tasks(workspace.id, 0).await.unwrap(),
+        vec![stored]
+    );
+    assert_eq!(
+        http.get(&url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
     server.stop().await;
     std::fs::remove_dir_all(dir).unwrap();
 }

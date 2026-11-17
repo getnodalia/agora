@@ -145,9 +145,20 @@ terms; keep production at `info` (the default).
 - A server administrator can see metadata and could try to add a device: see "End-to-end
   encryption".
 
-## Workspace task API
+## Organizations
 
-The experimental task API stores titles, status, priority, assignment and due dates as
-server-readable SQLite data. Owners, admins and members can read and edit tasks in their workspace;
-guests and non-members cannot. Tasks are not MLS messages and do not inherit message encryption.
-The API requires an explicit acknowledgement on creation and does not copy text from messages.
+The experimental organization API separates organization membership from workspace and channel
+permissions. Membership in an organization alone does not grant access to its workspaces; workspace
+and channel membership checks remain in force. Only the organization owner can add or change
+organization roles, create its workspaces or issue invitations to them. An invitation to a company
+workspace also admits the invitee to that organization; it does not change an existing organization
+role. Roles at the two levels are independent, and changing an organization role does not revoke
+access already granted in a workspace. Removing members and transferring ownership are not yet
+implemented. Organization names and roles are server-readable metadata, not MLS messages.
+
+## Previous workspace task data
+
+The experimental server-readable task API is disabled pending an end-to-end encrypted replacement.
+Existing task rows are preserved as stored: titles and metadata remain readable to anyone with
+database access. Disabling the endpoints does not retroactively encrypt or delete them. A deliberate,
+tested migration or export will be required before handling those rows; do not delete them silently.

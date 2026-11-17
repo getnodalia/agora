@@ -482,6 +482,9 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
             });
         }
         ui.separator();
+        if ui.button(tr("Organizations")).clicked() {
+            actions.push(Action::OpenOrganizations);
+        }
         if ui.button(tr("Create a workspace")).clicked() {
             actions.push(Action::Dialog(Dialog::CreateWorkspace {
                 name: String::new(),

@@ -2,8 +2,8 @@
 //! conversation, edit a topic or a message, confirm a deletion, Preferences, About and the
 //! keyboard shortcuts. Each has the NDL heading with a round close button.
 
-use agora_core::{ChannelId, MessageId};
-use agora_protocol::Invite;
+use agora_core::{ChannelId, MessageId, OrganizationId, Role};
+use agora_protocol::{Invite, Member, Organization, Workspace};
 use egui::{vec2, Align, Id, Layout, RichText, TextEdit, Ui};
 use nodalia_theme::creator::{self as cr, layout, Look};
 use nodalia_theme::font_size;
@@ -15,6 +15,20 @@ use crate::i18n::{self, tr, trf, Lang};
 use crate::settings::{Settings, Theme, WindowControls};
 use crate::view;
 use crate::widgets::avatar;
+
+#[derive(Clone, Debug)]
+pub struct OrganizationDialog {
+    pub generation: u64,
+    pub organizations: Vec<Organization>,
+    pub selected: Option<OrganizationId>,
+    pub workspaces: Vec<Workspace>,
+    pub members: Vec<Member>,
+    pub name: String,
+    pub workspace_name: String,
+    pub pending: bool,
+    pub loaded: bool,
+    pub details_loaded: bool,
+}
 
 #[derive(Clone, Debug)]
 pub enum Dialog {
@@ -48,6 +62,7 @@ pub enum Dialog {
     ConfirmDelete {
         id: MessageId,
     },
+    Organizations(OrganizationDialog),
     Preferences,
     About,
     Shortcuts,
@@ -72,6 +87,7 @@ impl Dialog {
             Dialog::Topic { .. } => tr("Topic"),
             Dialog::Edit { .. } => tr("Edit message"),
             Dialog::ConfirmDelete { .. } => tr("Delete this message?"),
+            Dialog::Organizations(_) => tr("Organizations"),
             Dialog::Preferences => tr("Preferences"),
             Dialog::About => tr("About Ágora"),
             Dialog::Shortcuts => tr("Keyboard shortcuts"),
@@ -116,7 +132,17 @@ pub fn show(
                 });
             });
             ui.add_space(12.0);
-            body(ui, main, settings, look, &mut dialog, actions, &mut close);
+            if matches!(dialog, Dialog::Organizations(_)) {
+                let max_height = (ctx.content_rect().height() - 140.0).max(120.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("organization-dialog-body")
+                    .max_height(max_height)
+                    .show(ui, |ui| {
+                        body(ui, main, settings, look, &mut dialog, actions, &mut close);
+                    });
+            } else {
+                body(ui, main, settings, look, &mut dialog, actions, &mut close);
+            }
         });
     if response.should_close() {
         close = true;
@@ -128,13 +154,13 @@ pub fn show(
     main.dialog = Some(dialog);
 }
 
-fn label(ui: &mut Ui, look: &Look, text: &str) {
+fn label(ui: &mut Ui, look: &Look, text: &str) -> egui::Response {
     ui.add_space(6.0);
     ui.label(
         RichText::new(text)
             .size(font_size::SMALL)
             .color(color(look.palette.text_secondary)),
-    );
+    )
 }
 
 fn field(ui: &mut Ui, look: &Look, text: &mut String, focus: bool) -> egui::Response {
@@ -165,6 +191,15 @@ fn buttons(ui: &mut Ui, look: &Look, confirm: &str, enabled: bool) -> (bool, boo
     out
 }
 
+fn organization_role_label(role: Role) -> &'static str {
+    match role {
+        Role::Owner => tr("Owner"),
+        Role::Admin => tr("Admin"),
+        Role::Member => tr("Member"),
+        Role::Guest => tr("Guest"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn body(
     ui: &mut Ui,
@@ -178,6 +213,152 @@ fn body(
     let p = &look.palette;
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     match dialog {
+        Dialog::Organizations(state) => {
+            ui.label(tr("Companies contain separate workspaces. Membership alone does not grant access to every workspace."));
+            if state.pending {
+                ui.label(tr("Working…"));
+            }
+            if !state.loaded && !state.pending {
+                ui.label(tr("Could not load organizations. Close and try again."));
+            }
+            if state.loaded {
+                egui::ScrollArea::vertical()
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        for organization in &state.organizations {
+                            if ui
+                                .add_enabled(
+                                    !state.pending,
+                                    egui::Button::new(&organization.name)
+                                        .selected(state.selected == Some(organization.id)),
+                                )
+                                .clicked()
+                            {
+                                actions.push(Action::SelectOrganization(organization.id));
+                            }
+                        }
+                        if state.organizations.is_empty() {
+                            ui.label(tr("No organizations yet."));
+                        }
+                    });
+                ui.add_enabled_ui(!state.pending, |ui| {
+                    let name_label = label(ui, look, tr("Organization name"));
+                    field(ui, look, &mut state.name, false).labelled_by(name_label.id);
+                    if cr::primary_button(
+                        ui,
+                        look,
+                        tr("Create organization"),
+                        agora_core::validate::workspace_name(&state.name).is_ok(),
+                    )
+                    .clicked()
+                    {
+                        actions.push(Action::CreateOrganization(state.name.trim().to_owned()));
+                    }
+                });
+                if let Some(org) = state
+                    .organizations
+                    .iter()
+                    .find(|o| Some(o.id) == state.selected)
+                {
+                    ui.separator();
+                    ui.label(RichText::new(&org.name).strong());
+                    if !state.details_loaded && !state.pending {
+                        ui.label(tr(
+                            "Could not load organization details. Select it to retry.",
+                        ));
+                    }
+                    if !state.details_loaded {
+                        return;
+                    }
+                    ui.label(tr("Workspaces"));
+                    egui::ScrollArea::vertical()
+                        .id_salt("org-workspaces")
+                        .max_height(100.0)
+                        .show(ui, |ui| {
+                            for workspace in &state.workspaces {
+                                if ui
+                                    .add_enabled(!state.pending, egui::Button::new(&workspace.name))
+                                    .clicked()
+                                {
+                                    actions.push(Action::OpenOrganizationWorkspace(workspace.id));
+                                }
+                            }
+                        });
+                    if org.role == Role::Owner {
+                        ui.add_enabled_ui(!state.pending, |ui| {
+                            let name_label = label(ui, look, tr("Workspace name"));
+                            field(ui, look, &mut state.workspace_name, false)
+                                .labelled_by(name_label.id);
+                            if cr::secondary_button(
+                                ui,
+                                look,
+                                tr("Create workspace in organization"),
+                                agora_core::validate::workspace_name(&state.workspace_name).is_ok(),
+                            )
+                            .clicked()
+                            {
+                                actions.push(Action::CreateOrganizationWorkspace(
+                                    org.id,
+                                    state.workspace_name.trim().to_owned(),
+                                ));
+                            }
+                        });
+                        ui.label(tr("Organization members"));
+                        ui.label(tr("Only the owner can manage this organization; other organization roles have the same permissions."));
+                        ui.label(tr("Changing an organization role does not change existing workspace access."));
+                        egui::ScrollArea::vertical()
+                            .id_salt("org-members")
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                for member in &state.members {
+                                    ui.horizontal(|ui| {
+                                        ui.label(format!(
+                                            "{} (@{})",
+                                            member.user.display_name, member.user.username
+                                        ));
+                                        if member.role == Role::Owner {
+                                            ui.label(tr("Owner"));
+                                        } else {
+                                            let mut role = member.role;
+                                            ui.add_enabled_ui(!state.pending, |ui| {
+                                                egui::ComboBox::from_id_salt((
+                                                    "org-role",
+                                                    member.user.id.0,
+                                                ))
+                                                .selected_text(organization_role_label(role))
+                                                .show_ui(ui, |ui| {
+                                                    ui.selectable_value(
+                                                        &mut role,
+                                                        Role::Admin,
+                                                        tr("Admin"),
+                                                    );
+                                                    ui.selectable_value(
+                                                        &mut role,
+                                                        Role::Member,
+                                                        tr("Member"),
+                                                    );
+                                                    ui.selectable_value(
+                                                        &mut role,
+                                                        Role::Guest,
+                                                        tr("Guest"),
+                                                    );
+                                                });
+                                            });
+                                            if role != member.role && !state.pending {
+                                                actions.push(Action::SetOrganizationRole(
+                                                    org.id,
+                                                    member.user.id,
+                                                    role,
+                                                ));
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+                    }
+                }
+            }
+        }
         Dialog::CreateWorkspace { name } => {
             label(ui, look, tr("Workspace name"));
             field(ui, look, name, true);

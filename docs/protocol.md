@@ -66,20 +66,31 @@ Close codes: `4001` the session is invalid (do not retry), `1011` server error a
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last
 message it has, which is how nothing is lost while it was away.
 
-### Workspace tasks (experimental API)
+### Organizations (experimental API)
 
-Tasks are independent of messages. The server stores task titles and metadata in plaintext;
-workspace owners, admins and members can read and edit all tasks in that workspace. Guests and
-non-members cannot access this API. It does not retrieve or copy encrypted messages. Clients must
-explain this privacy boundary and obtain the user's explicit acknowledgement before creation.
+`POST /organizations` creates an organization and makes its creator its owner; `GET /organizations`
+lists those the caller belongs to. The owner alone may list organization members, assign an existing
+account a non-owner organization role with `PUT /organizations/{id}/members/{user}`, and create a
+workspace with `POST /organizations/{id}/workspaces`. The owner role cannot be reassigned through
+this API. `GET /organizations/{id}/workspaces` returns only workspaces the caller already belongs to;
+organization membership alone never grants access to a workspace or its channels. Organization and
+workspace roles are independent: changing one does not change the other or revoke existing workspace
+access. For an organization workspace, only the organization owner can issue workspace invitations;
+redeeming one adds the invitee to the organization as a member or guest without overwriting an
+existing organization role. Existing standalone workspaces remain standalone after migration.
 
-- `GET /workspaces/{id}/tasks?after=<id>` returns at most 100 tasks ordered by ascending id;
-  pass the final id to retrieve the next page.
-- `POST /workspaces/{id}/tasks` accepts `title`, `priority` (`low`, `normal`, `high`), optional
-  `assignee_id` and `due_at` (UTC milliseconds), and requires `acknowledge_server_readable: true`.
-- `PUT /workspaces/{id}/tasks/{task_id}` replaces those fields plus `status` (`todo`,
-  `in_progress`, `done`) and `revision`. A stale revision returns 409; reload before retrying.
+The desktop Organizations dialog can create organizations and their workspaces, select an accessible
+workspace and change the organization role of an existing organization member. Invitations to an
+organization workspace add the invitee to the organization as described above. Workspace role
+management, member removal, ownership transfer and moving existing workspaces into an organization
+are not implemented.
 
-This is an API foundation only. The desktop app, comments, message links, live updates and offline
-sync are not implemented. Do not put confidential message text into a task without the user's
-explicit decision and a clear explanation of the different privacy guarantees.
+In this initial implementation only the owner has organization-management privileges; admin, member
+and guest organization roles do not yet differ in their organization-level permissions.
+
+### Workspace tasks
+
+The previous experimental server-readable task endpoints are disabled while an end-to-end encrypted
+replacement is developed. They return 404. Existing task rows are preserved in the database and
+remain server-readable; disabling the API does not encrypt or delete those rows. There is no task
+API or task UI in this version. No automatic conversion of earlier data is performed.

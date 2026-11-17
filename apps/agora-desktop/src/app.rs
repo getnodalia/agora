@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use agora_client::{Client, ClientError, Realtime, RealtimeEvent, Secure};
-use agora_core::{ChannelId, MessageId, UserId, WorkspaceId};
+use agora_core::{ChannelId, MessageId, OrganizationId, Role, UserId, WorkspaceId};
 use agora_protocol::{
     ClientFrame, CreateChannelRequest, CreateInviteRequest, Invite, Message, RegisterRequest,
     ServerEvent, ServerInfo, SessionResponse,
@@ -59,6 +59,7 @@ pub struct Main {
     /// Unsent text, per channel and thread.
     pub drafts: HashMap<(ChannelId, Option<MessageId>), String>,
     pub dialog: Option<dialogs::Dialog>,
+    organization_generation: u64,
     pub search: String,
     pub results: Option<(String, Vec<Message>)>,
     pub panel: Panel,
@@ -84,6 +85,12 @@ pub enum Panel {
 /// Something a screen asked for.
 #[derive(Clone, Debug)]
 pub enum Action {
+    OpenOrganizations,
+    SelectOrganization(OrganizationId),
+    CreateOrganization(String),
+    CreateOrganizationWorkspace(OrganizationId, String),
+    SetOrganizationRole(OrganizationId, UserId, Role),
+    OpenOrganizationWorkspace(WorkspaceId),
     SelectWorkspace(WorkspaceId),
     SelectChannel(ChannelId),
     JoinChannel(ChannelId),
@@ -333,6 +340,7 @@ impl App {
             realtime: Some(realtime),
             drafts: HashMap::new(),
             dialog: None,
+            organization_generation: 0,
             search: String::new(),
             results: None,
             panel: Panel::Details,
@@ -556,6 +564,68 @@ impl Main {
                 }
             }
             Reply::Members(ws, result) => self.model.set_members(ws, result?),
+            Reply::Organizations(generation, result) => {
+                if let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog {
+                    if d.generation == generation {
+                        d.pending = false;
+                        d.organizations = result?;
+                        d.loaded = true;
+                    }
+                }
+            }
+            Reply::OrganizationDetails(generation, org, result) => {
+                if let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog {
+                    if d.generation == generation && d.selected == Some(org) {
+                        d.pending = false;
+                        let (workspaces, members) = result?;
+                        d.workspaces = workspaces;
+                        d.members = members;
+                        d.details_loaded = true;
+                    }
+                }
+            }
+            Reply::OrganizationCreated(generation, result) => {
+                if let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog {
+                    if d.generation == generation {
+                        d.pending = false;
+                        let org = result?;
+                        let id = org.id;
+                        d.name.clear();
+                        d.organizations.push(org);
+                        self.act(net, Action::SelectOrganization(id), now);
+                    }
+                }
+            }
+            Reply::OrganizationWorkspaceCreated(generation, org, result) => {
+                let active = matches!(&self.dialog, Some(dialogs::Dialog::Organizations(d)) if d.generation == generation && d.selected == Some(org));
+                if active {
+                    if let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog {
+                        d.pending = false;
+                    }
+                }
+                let ws = result?;
+                if active {
+                    let id = ws.id;
+                    if !self.model.workspaces.iter().any(|w| w.id == id) {
+                        self.model.workspaces.push(ws);
+                    }
+                    self.dialog = None;
+                    self.select_workspace(net, id);
+                } else {
+                    let client = self.client.clone();
+                    net.run(async move { Reply::Workspaces(client.workspaces().await) });
+                }
+            }
+            Reply::OrganizationMemberChanged(generation, org, result) => {
+                if let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog {
+                    if d.generation == generation && d.selected == Some(org) {
+                        d.pending = false;
+                        result?;
+                        self.act(net, Action::SelectOrganization(org), now);
+                    }
+                }
+            }
+
             Reply::History {
                 channel,
                 before,
@@ -889,6 +959,117 @@ impl Main {
 
     fn act(&mut self, net: &Net, action: Action, now: f64) {
         match action {
+            Action::OpenOrganizations => {
+                self.organization_generation = self.organization_generation.wrapping_add(1);
+                let generation = self.organization_generation;
+                self.dialog = Some(dialogs::Dialog::Organizations(
+                    dialogs::OrganizationDialog {
+                        generation,
+                        organizations: Vec::new(),
+                        selected: None,
+                        workspaces: Vec::new(),
+                        members: Vec::new(),
+                        name: String::new(),
+                        workspace_name: String::new(),
+                        pending: true,
+                        loaded: false,
+                        details_loaded: false,
+                    },
+                ));
+                let client = self.client.clone();
+                net.run(
+                    async move { Reply::Organizations(generation, client.organizations().await) },
+                );
+            }
+            Action::SelectOrganization(org) => {
+                let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog else {
+                    return;
+                };
+                if d.pending {
+                    return;
+                }
+                let Some(selected) = d.organizations.iter().find(|o| o.id == org) else {
+                    return;
+                };
+                let is_owner = selected.role == Role::Owner;
+                d.selected = Some(org);
+                d.pending = true;
+                d.details_loaded = false;
+                d.workspaces.clear();
+                d.members.clear();
+                let generation = d.generation;
+                let client = self.client.clone();
+                net.run(async move {
+                    let result = async {
+                        let workspaces = client.organization_workspaces(org).await?;
+                        let members = if is_owner {
+                            client.organization_members(org).await?
+                        } else {
+                            Vec::new()
+                        };
+                        Ok((workspaces, members))
+                    }
+                    .await;
+                    Reply::OrganizationDetails(generation, org, result)
+                });
+            }
+            Action::CreateOrganization(name) => {
+                let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog else {
+                    return;
+                };
+                if d.pending || agora_core::validate::workspace_name(&name).is_err() {
+                    return;
+                }
+                d.pending = true;
+                let generation = d.generation;
+                let client = self.client.clone();
+                net.run(async move {
+                    Reply::OrganizationCreated(generation, client.create_organization(&name).await)
+                });
+            }
+            Action::CreateOrganizationWorkspace(org, name) => {
+                let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog else {
+                    return;
+                };
+                if d.pending
+                    || d.selected != Some(org)
+                    || agora_core::validate::workspace_name(&name).is_err()
+                {
+                    return;
+                }
+                d.pending = true;
+                let generation = d.generation;
+                let client = self.client.clone();
+                net.run(async move {
+                    Reply::OrganizationWorkspaceCreated(
+                        generation,
+                        org,
+                        client.create_organization_workspace(org, &name).await,
+                    )
+                });
+            }
+            Action::SetOrganizationRole(org, user, role) => {
+                let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog else {
+                    return;
+                };
+                if d.pending || d.selected != Some(org) || role == Role::Owner {
+                    return;
+                }
+                d.pending = true;
+                let generation = d.generation;
+                let client = self.client.clone();
+                net.run(async move {
+                    Reply::OrganizationMemberChanged(
+                        generation,
+                        org,
+                        client.set_organization_member(org, user, role).await,
+                    )
+                });
+            }
+            Action::OpenOrganizationWorkspace(ws) => {
+                self.dialog = None;
+                self.select_workspace(net, ws);
+            }
             Action::SelectWorkspace(ws) => self.select_workspace(net, ws),
             Action::SelectChannel(id) => self.select_channel(net, id),
             Action::JoinChannel(id) => {

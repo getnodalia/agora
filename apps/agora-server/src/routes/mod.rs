@@ -5,6 +5,7 @@ pub mod accounts;
 pub mod channels;
 pub mod e2e;
 pub mod messages;
+pub mod organizations;
 pub mod tasks;
 pub mod workspaces;
 
@@ -33,17 +34,25 @@ pub fn router() -> Router<AppState> {
         .route("/devices/me", put(e2e::register_device))
         .route("/devices/me/key_packages", post(e2e::publish_key_packages))
         .route(
+            "/organizations",
+            get(organizations::list).post(organizations::create),
+        )
+        .route("/organizations/{id}/members", get(organizations::members))
+        .route(
+            "/organizations/{id}/members/{user}",
+            put(organizations::set_member),
+        )
+        .route(
+            "/organizations/{id}/workspaces",
+            get(organizations::workspaces).post(organizations::create_workspace),
+        )
+        .route(
             "/workspaces",
             get(workspaces::list).post(workspaces::create),
         )
         .route("/workspaces/join", post(workspaces::join))
         .route("/workspaces/{id}", get(workspaces::get_one))
         .route("/workspaces/{id}/members", get(workspaces::members))
-        .route(
-            "/workspaces/{id}/tasks",
-            get(tasks::list).post(tasks::create),
-        )
-        .route("/workspaces/{id}/tasks/{task_id}", put(tasks::update))
         .route("/workspaces/{id}/invites", post(workspaces::create_invite))
         .route(
             "/workspaces/{id}/channels",
