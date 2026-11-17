@@ -19,8 +19,9 @@ The receiver verifies GitHub's HMAC-SHA256 over the raw body before parsing it a
 signed repository ID. Requests are bounded to 1 MiB and rate-limited per client IP, using the
 server's trusted-proxy settings. GitHub signs the body, not the event or delivery headers; do not
 use those headers as proof of authorization. Repeated delivery IDs or identical body hashes are
-ignored while retained; the most recent 5,000 entries are retained per workspace, so older
-replays are not detected. Identical legitimate payloads may be collapsed. Events larger than the
+ignored even after display records are pruned; replay markers remain until the workspace is
+deleted and consume storage over time. The most recent 5,000 display records are retained per
+workspace. Identical legitimate payloads may be collapsed. Events larger than the
 limit are rejected, and GitHub may require manual redelivery after a failure.
 
 Workspace members can read the latest 100 records using authenticated

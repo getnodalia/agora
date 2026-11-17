@@ -124,6 +124,29 @@ async fn signed_events_are_scoped_deduplicated_and_persisted() {
         .await
         .unwrap();
     assert_eq!(events.len(), 1);
+    // Simulate display-history pruning: replay markers must survive it and server restart.
+    agora_storage::sqlx::query("DELETE FROM github_events WHERE workspace_id = ?")
+        .bind(ws.id.0)
+        .execute(server.state.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        send(body, signature(body, SECRET), DELIVERY)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let events: Vec<agora_protocol::GitHubEvent> = http
+        .get(&list)
+        .bearer_auth(owner.token().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(events.is_empty());
     server.stop().await;
     std::fs::remove_dir_all(dir).unwrap();
 }

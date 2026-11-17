@@ -27,10 +27,13 @@ impl Store {
             now,
         } = input;
         let mut tx = self.pool.begin().await?;
-        let inserted = sqlx::query("INSERT OR IGNORE INTO github_events (workspace_id, delivery, payload_hash, event, action, object_number, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(ws.0).bind(delivery).bind(hash.as_slice()).bind(event).bind(action).bind(object_number).bind(now)
+        let inserted = sqlx::query("INSERT OR IGNORE INTO github_event_seen (workspace_id, delivery, payload_hash) VALUES (?, ?, ?)")
+            .bind(ws.0).bind(delivery).bind(hash.as_slice())
             .execute(&mut *tx).await?.rows_affected() == 1;
         if inserted {
+            sqlx::query("INSERT INTO github_events (workspace_id, delivery, payload_hash, event, action, object_number, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                .bind(ws.0).bind(delivery).bind(hash.as_slice()).bind(event).bind(action).bind(object_number).bind(now)
+                .execute(&mut *tx).await?;
             sqlx::query("DELETE FROM github_events WHERE workspace_id = ? AND id NOT IN (SELECT id FROM github_events WHERE workspace_id = ? ORDER BY id DESC LIMIT 5000)")
                 .bind(ws.0).bind(ws.0).execute(&mut *tx).await?;
         }

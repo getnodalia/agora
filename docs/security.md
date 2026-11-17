@@ -50,7 +50,7 @@ End-to-end encryption hides the text, not the rest:
   to workspace members and the server. The icon API is not yet connected to the desktop app.
 - GitHub event metadata in the optional server-side inbox is server-readable and visible to all
   members of the configured workspace. It is separate from encrypted messages. See
-  [github-webhook.md](github-webhook.md) for its limits and replay window.
+  [github-webhook.md](github-webhook.md) for its limits and replay markers.
 
 ### What it does not protect against
 
