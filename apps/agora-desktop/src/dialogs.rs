@@ -2,8 +2,8 @@
 //! conversation, edit a topic or a message, confirm a deletion, Preferences, About and the
 //! keyboard shortcuts. Each has the NDL heading with a round close button.
 
-use agora_core::{ChannelId, MessageId, OrganizationId, Role};
-use agora_protocol::{Invite, Member, Organization, Workspace};
+use agora_core::{ChannelId, MessageId, OrganizationId, Role, WorkspaceId};
+use agora_protocol::{GitHubEvent, Invite, Member, Organization, Workspace};
 use egui::{vec2, Align, Id, Layout, RichText, TextEdit, Ui};
 use nodalia_theme::creator::{self as cr, layout, Look};
 use nodalia_theme::font_size;
@@ -32,6 +32,13 @@ pub struct OrganizationDialog {
 
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    GitHubEvents {
+        generation: u64,
+        workspace: WorkspaceId,
+        events: Vec<GitHubEvent>,
+        pending: bool,
+        failed: bool,
+    },
     CreateWorkspace {
         name: String,
     },
@@ -79,6 +86,7 @@ impl Dialog {
 
     fn title(&self) -> &'static str {
         match self {
+            Dialog::GitHubEvents { .. } => tr("GitHub activity"),
             Dialog::CreateWorkspace { .. } => tr("Create a workspace"),
             Dialog::JoinWorkspace { .. } => tr("Join a workspace"),
             Dialog::CreateChannel { .. } => tr("Create a channel"),
@@ -213,6 +221,43 @@ fn body(
     let p = &look.palette;
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     match dialog {
+        Dialog::GitHubEvents {
+            events,
+            pending,
+            failed,
+            ..
+        } => {
+            ui.label(tr("GitHub activity is visible to this workspace and the server. It is not end-to-end encrypted."));
+            ui.add_space(8.0);
+            if *pending {
+                ui.label(tr("Working…"));
+            } else if *failed {
+                ui.label(tr("Could not load GitHub activity."));
+            } else if events.is_empty() {
+                ui.label(tr(
+                    "No GitHub activity yet, or the integration is not configured.",
+                ));
+            } else {
+                egui::ScrollArea::vertical()
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        for event in events.iter() {
+                            let number = event
+                                .object_number
+                                .map_or_else(String::new, |n| format!(" #{n}"));
+                            let action = event.action.as_deref().unwrap_or("");
+                            ui.label(format!("{}{} · {}", event.event, number, action));
+                        }
+                    });
+            }
+            ui.add_space(8.0);
+            if ui
+                .add_enabled(!*pending, egui::Button::new(tr("Refresh")))
+                .clicked()
+            {
+                actions.push(Action::RefreshGitHubEvents);
+            }
+        }
         Dialog::Organizations(state) => {
             ui.label(tr("Companies contain separate workspaces. Membership alone does not grant access to every workspace."));
             if state.pending {
