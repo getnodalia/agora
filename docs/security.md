@@ -156,9 +156,9 @@ role. Roles at the two levels are independent, and changing an organization role
 access already granted in a workspace. Removing members and transferring ownership are not yet
 implemented. Organization names and roles are server-readable metadata, not MLS messages.
 
-## Workspace task API
+## Previous workspace task data
 
-The experimental task API stores titles, status, priority, assignment and due dates as
-server-readable SQLite data. Owners, admins and members can read and edit tasks in their workspace;
-guests and non-members cannot. Tasks are not MLS messages and do not inherit message encryption.
-The API requires an explicit acknowledgement on creation and does not copy text from messages.
+The experimental server-readable task API is disabled pending an end-to-end encrypted replacement.
+Existing task rows are preserved as stored: titles and metadata remain readable to anyone with
+database access. Disabling the endpoints does not retroactively encrypt or delete them. A deliberate,
+tested migration or export will be required before handling those rows; do not delete them silently.
