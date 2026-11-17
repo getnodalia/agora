@@ -11,7 +11,7 @@ use agora_core::{ChannelId, MessageId, WorkspaceId};
 use agora_e2e::Leaf;
 use agora_protocol::{
     Channel, Invite, Member, Message, MessagePage, Reaction, SearchResults, ServerEvent,
-    ServerInfo, SessionResponse, Thread, User, Workspace,
+    ServerInfo, SessionResponse, Task, Thread, User, Workspace,
 };
 
 pub type Result<T> = std::result::Result<T, ClientError>;
@@ -30,6 +30,8 @@ pub enum Reply {
     ChannelOpened(Result<Channel>),
     ChannelLeft(ChannelId, Result<()>),
     Members(WorkspaceId, Result<Vec<Member>>),
+    Tasks(WorkspaceId, u64, i64, Result<Vec<Task>>),
+    TaskSaved(WorkspaceId, u64, bool, Result<Task>),
     /// A page of history. `before` is set for older pages; `after` for a catch-up.
     History {
         channel: ChannelId,

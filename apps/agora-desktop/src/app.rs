@@ -59,6 +59,7 @@ pub struct Main {
     /// Unsent text, per channel and thread.
     pub drafts: HashMap<(ChannelId, Option<MessageId>), String>,
     pub dialog: Option<dialogs::Dialog>,
+    task_generation: u64,
     pub search: String,
     pub results: Option<(String, Vec<Message>)>,
     pub panel: Panel,
@@ -82,6 +83,14 @@ pub enum Panel {
 /// Something a screen asked for.
 #[derive(Clone, Debug)]
 pub enum Action {
+    OpenTasks,
+    LoadTasks(WorkspaceId, i64),
+    CreateTask(WorkspaceId, String),
+    ChangeTaskStatus(
+        WorkspaceId,
+        agora_protocol::Task,
+        agora_protocol::TaskStatus,
+    ),
     SelectWorkspace(WorkspaceId),
     SelectChannel(ChannelId),
     JoinChannel(ChannelId),
@@ -331,6 +340,7 @@ impl App {
             realtime: Some(realtime),
             drafts: HashMap::new(),
             dialog: None,
+            task_generation: 0,
             search: String::new(),
             results: None,
             panel: Panel::Details,
@@ -546,6 +556,50 @@ impl Main {
                 }
             }
             Reply::Members(ws, result) => self.model.set_members(ws, result?),
+            Reply::Tasks(ws, generation, after, result) => {
+                if let Some(dialogs::Dialog::Tasks {
+                    workspace,
+                    generation: current,
+                    tasks,
+                    pending,
+                    loaded,
+                    has_more,
+                    ..
+                }) = &mut self.dialog
+                {
+                    if *workspace == ws && *current == generation {
+                        *pending = false;
+                        let page = result?;
+                        *loaded = true;
+                        *has_more = page.len() == 100;
+                        if after == 0 {
+                            tasks.clear();
+                        }
+                        tasks.extend(page);
+                    }
+                }
+            }
+            Reply::TaskSaved(ws, generation, created, result) => {
+                if let Some(dialogs::Dialog::Tasks {
+                    workspace,
+                    generation: current,
+                    title,
+                    acknowledged,
+                    pending,
+                    ..
+                }) = &mut self.dialog
+                {
+                    if *workspace == ws && *current == generation {
+                        *pending = false;
+                        result?;
+                        if created {
+                            title.clear();
+                            *acknowledged = false;
+                        }
+                        self.act(net, Action::LoadTasks(ws, 0), now);
+                    }
+                }
+            }
             Reply::History {
                 channel,
                 before,
@@ -865,6 +919,104 @@ impl Main {
 
     fn act(&mut self, net: &Net, action: Action, now: f64) {
         match action {
+            Action::OpenTasks => {
+                let Some(ws) = self.model.workspace else {
+                    return;
+                };
+                self.task_generation = self.task_generation.wrapping_add(1);
+                self.dialog = Some(dialogs::Dialog::Tasks {
+                    workspace: ws,
+                    generation: self.task_generation,
+                    tasks: Vec::new(),
+                    title: String::new(),
+                    acknowledged: false,
+                    pending: false,
+                    loaded: false,
+                    has_more: false,
+                });
+                self.act(net, Action::LoadTasks(ws, 0), now);
+            }
+            Action::LoadTasks(ws, after) => {
+                let Some(dialogs::Dialog::Tasks {
+                    workspace,
+                    generation,
+                    pending,
+                    ..
+                }) = &mut self.dialog
+                else {
+                    return;
+                };
+                if *workspace != ws || *pending {
+                    return;
+                }
+                *pending = true;
+                let generation = *generation;
+                let client = self.client.clone();
+                net.run(async move {
+                    Reply::Tasks(ws, generation, after, client.tasks(ws, after).await)
+                });
+            }
+            Action::CreateTask(ws, title) => {
+                let Some(dialogs::Dialog::Tasks {
+                    workspace,
+                    generation,
+                    pending,
+                    acknowledged,
+                    ..
+                }) = &mut self.dialog
+                else {
+                    return;
+                };
+                if *workspace != ws || *pending || !*acknowledged {
+                    return;
+                }
+                *pending = true;
+                let generation = *generation;
+                let client = self.client.clone();
+                let request = agora_protocol::CreateTaskRequest {
+                    title,
+                    priority: agora_protocol::TaskPriority::Normal,
+                    assignee_id: None,
+                    due_at: None,
+                    acknowledge_server_readable: true,
+                };
+                net.run(async move {
+                    Reply::TaskSaved(ws, generation, true, client.create_task(ws, &request).await)
+                });
+            }
+            Action::ChangeTaskStatus(ws, task, status) => {
+                let Some(dialogs::Dialog::Tasks {
+                    workspace,
+                    generation,
+                    pending,
+                    ..
+                }) = &mut self.dialog
+                else {
+                    return;
+                };
+                if *workspace != ws || *pending {
+                    return;
+                }
+                *pending = true;
+                let generation = *generation;
+                let client = self.client.clone();
+                let req = agora_protocol::UpdateTaskRequest {
+                    title: task.title,
+                    status,
+                    priority: task.priority,
+                    assignee_id: task.assignee_id,
+                    due_at: task.due_at,
+                    revision: task.revision,
+                };
+                net.run(async move {
+                    Reply::TaskSaved(
+                        ws,
+                        generation,
+                        false,
+                        client.update_task(ws, task.id, &req).await,
+                    )
+                });
+            }
             Action::SelectWorkspace(ws) => self.select_workspace(net, ws),
             Action::SelectChannel(id) => self.select_channel(net, id),
             Action::JoinChannel(id) => {

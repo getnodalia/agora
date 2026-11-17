@@ -111,6 +111,7 @@ async fn tasks_are_workspace_scoped_persistent_and_conflict_safe() {
     assert_eq!(res.status(), StatusCode::CREATED);
     let task: Task = res.json().await.unwrap();
     assert_eq!(task.assignee_id, Some(member_user.id));
+    assert_eq!(member.tasks(ws.id, 0).await.unwrap(), vec![task.clone()]);
     let update = UpdateTaskRequest {
         title: task.title.clone(),
         status: TaskStatus::InProgress,
@@ -120,15 +121,7 @@ async fn tasks_are_workspace_scoped_persistent_and_conflict_safe() {
         revision: task.revision,
     };
     let task_url = format!("{url}/{}", task.id);
-    let res = http
-        .put(&task_url)
-        .bearer_auth(member.token().unwrap())
-        .json(&update)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let changed: Task = res.json().await.unwrap();
+    let changed = member.update_task(ws.id, task.id, &update).await.unwrap();
     assert_eq!(changed.revision, 2);
     assert_eq!(
         http.put(&task_url)

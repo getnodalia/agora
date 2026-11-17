@@ -80,6 +80,9 @@ explain this privacy boundary and obtain the user's explicit acknowledgement bef
 - `PUT /workspaces/{id}/tasks/{task_id}` replaces those fields plus `status` (`todo`,
   `in_progress`, `done`) and `revision`. A stale revision returns 409; reload before retrying.
 
-This is an API foundation only. The desktop app, comments, message links, live updates and offline
-sync are not implemented. Do not put confidential message text into a task without the user's
-explicit decision and a clear explanation of the different privacy guarantees.
+The desktop task dialog can list tasks, create a normal-priority task and move its status. It
+requires the user to acknowledge the privacy boundary. Use Refresh to see changes made elsewhere;
+there is no live update or offline queue. Editing titles, assignment, priority or due dates from
+the desktop, comments, message links and a Kanban board are not implemented. Do not put confidential
+message text into a task without the user's explicit decision and a clear explanation of the
+different privacy guarantees.

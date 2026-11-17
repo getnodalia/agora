@@ -256,6 +256,32 @@ impl Client {
         self.get(&format!("/workspaces/{ws}/members")).await
     }
 
+    /// List a page of workspace tasks after an id (at most 100).
+    pub async fn tasks(&self, ws: WorkspaceId, after: i64) -> Result<Vec<Task>> {
+        let mut url = self.url(&format!("/workspaces/{ws}/tasks"))?;
+        url.query_pairs_mut()
+            .append_pair("after", &after.to_string());
+        self.send::<(), Vec<Task>>(Method::GET, url, None).await
+    }
+
+    pub async fn create_task(&self, ws: WorkspaceId, req: &CreateTaskRequest) -> Result<Task> {
+        self.post(&format!("/workspaces/{ws}/tasks"), req).await
+    }
+
+    pub async fn update_task(
+        &self,
+        ws: WorkspaceId,
+        id: i64,
+        req: &UpdateTaskRequest,
+    ) -> Result<Task> {
+        self.send(
+            Method::PUT,
+            self.url(&format!("/workspaces/{ws}/tasks/{id}"))?,
+            Some(req),
+        )
+        .await
+    }
+
     pub async fn create_invite(
         &self,
         ws: WorkspaceId,
