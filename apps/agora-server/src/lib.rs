@@ -10,6 +10,7 @@ pub mod error;
 pub mod hub;
 pub mod limiter;
 pub mod mfa_crypto;
+pub mod mfa_service;
 pub mod routes;
 pub mod state;
 pub mod ws;
