@@ -13,6 +13,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use agora_core::{roles, ChannelId, Role, UserId, WorkspaceId};
 use agora_storage::ChannelRow;
+use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderMap;
 use axum::routing::{get, patch, post, put};
 use axum::Router;
@@ -52,6 +53,13 @@ pub fn router() -> Router<AppState> {
         )
         .route("/workspaces/join", post(workspaces::join))
         .route("/workspaces/{id}", get(workspaces::get_one))
+        .route(
+            "/workspaces/{id}/icon",
+            get(workspaces::get_icon)
+                .put(workspaces::put_icon)
+                .delete(workspaces::delete_icon)
+                .layer(DefaultBodyLimit::max(workspaces::ICON_MAX_BYTES)),
+        )
         .route("/workspaces/{id}/members", get(workspaces::members))
         .route("/workspaces/{id}/invites", post(workspaces::create_invite))
         .route(

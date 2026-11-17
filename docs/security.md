@@ -46,6 +46,8 @@ End-to-end encryption hides the text, not the rest:
   so it can count unread mentions);
 - reactions (the emoji, in clear), read markers, typing and presence;
 - the devices of each person and when they change.
+- workspace icons: optional PNG images are stored without end-to-end encryption and are visible
+  to workspace members and the server. The icon API is not yet connected to the desktop app.
 
 ### What it does not protect against
 

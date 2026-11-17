@@ -20,6 +20,7 @@ agora-core.workspace = true
 agora-e2e.workspace = true
 agora-protocol.workspace = true
 agora-storage.workspace = true
+png.workspace = true
 argon2.workspace = true
 axum.workspace = true
 base64.workspace = true
