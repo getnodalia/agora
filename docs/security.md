@@ -116,7 +116,21 @@ End-to-end encryption hides the text, not the rest:
 Per minute: sign-in and registration attempts per address (10), writes per account (120), reads
 per account (1200), typing notices (30); at most 16 WebSockets per account. All are in
 `agora.toml` (`[limits]`). Behind a proxy, set `trust_proxy = true` so the address comes from
-`X-Forwarded-For`; without a proxy that header is ignored.
+the last address in `X-Forwarded-For`; without a proxy that header is ignored. Limits are held in
+process memory and reset on restart; they are not shared between server processes. `trust_proxy`
+does not check the connecting peer: restrict access to the server port to a proxy you control,
+and configure that proxy to overwrite or safely append the header. Otherwise a direct client can
+forge its address and evade per-address limits. Check the complete proxy chain's header behavior;
+a tunnel alone does not make arbitrary direct connections to the server port trustworthy.
+
+## Desktop notifications
+
+On Linux, an opt-in notification can be sent to the local desktop notification service for a new
+message in a joined channel that is not currently visible. The notification contains only a generic
+message; it does not include the sender, channel or decrypted content. Notifications are limited to
+one every ten seconds. The service and the operating system may retain or display these alerts.
+There is no notification for messages received while the app is closed, and this implementation
+does not yet support notifications on macOS or Windows or a taskbar badge.
 
 ## Logs
 
@@ -141,3 +155,10 @@ workspace also admits the invitee to that organization; it does not change an ex
 role. Roles at the two levels are independent, and changing an organization role does not revoke
 access already granted in a workspace. Removing members and transferring ownership are not yet
 implemented. Organization names and roles are server-readable metadata, not MLS messages.
+
+## Workspace task API
+
+The experimental task API stores titles, status, priority, assignment and due dates as
+server-readable SQLite data. Owners, admins and members can read and edit tasks in their workspace;
+guests and non-members cannot. Tasks are not MLS messages and do not inherit message encryption.
+The API requires an explicit acknowledgement on creation and does not copy text from messages.

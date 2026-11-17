@@ -16,6 +16,7 @@ pub mod messages;
 pub mod mls;
 pub mod organizations;
 mod rows;
+pub mod tasks;
 pub mod users;
 pub mod workspaces;
 

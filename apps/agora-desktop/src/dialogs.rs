@@ -595,6 +595,15 @@ fn preferences(ui: &mut Ui, settings: &mut Settings, look: &Look, actions: &mut 
         tr("Keep me signed in on this computer"),
     );
     ui.checkbox(&mut settings.context_panel, tr("The details panel"));
+    #[cfg(target_os = "linux")]
+    {
+        heading(ui, tr("Notifications"));
+        ui.checkbox(
+            &mut settings.notifications,
+            tr("Notify me about new messages"),
+        );
+        ui.label(tr("Notifications never include message text or sender."));
+    }
     if *settings != before {
         actions.push(Action::SettingsChanged);
     }

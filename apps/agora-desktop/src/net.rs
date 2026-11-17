@@ -55,6 +55,8 @@ pub enum Reply {
     /// A request whose only interesting outcome is an error (read markers, deletions).
     Done(Result<()>),
     LoggedOut,
+    #[cfg(target_os = "linux")]
+    NotificationUnavailable,
     Realtime(RealtimeEvent),
     /// The devices in a conversation's encryption group, and those that just joined it.
     Devices {
@@ -98,6 +100,25 @@ impl Net {
             let reply = request.await;
             let _ = tx.send(reply);
             ctx.request_repaint();
+        });
+    }
+
+    /// Ask the local notification service off the UI thread; no message contents leave the app.
+    #[cfg(target_os = "linux")]
+    pub fn notify(&self, body: &'static str) {
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn_blocking(move || {
+            if notify_rust::Notification::new()
+                .appname("Ágora")
+                .summary("Ágora")
+                .body(body)
+                .show()
+                .is_err()
+            {
+                let _ = tx.send(Reply::NotificationUnavailable);
+                ctx.request_repaint();
+            }
         });
     }
 
