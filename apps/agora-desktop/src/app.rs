@@ -65,6 +65,8 @@ pub struct Main {
     /// The message under the pointer, and whether it is in the main list (not the thread panel).
     pub hovered: Option<(MessageId, bool)>,
     pub last_typing: f64,
+    #[cfg(target_os = "linux")]
+    last_notification: Option<f64>,
     pub focus_composer: bool,
     pub focus_search: bool,
     /// Things to tell the person, shown as toasts.
@@ -336,6 +338,8 @@ impl App {
             panel: Panel::Details,
             hovered: None,
             last_typing: 0.0,
+            #[cfg(target_os = "linux")]
+            last_notification: None,
             focus_composer: true,
             focus_search: false,
             notices: Vec::new(),
@@ -400,7 +404,7 @@ impl App {
                 let Screen::Main(main) = &mut self.screen else {
                     return;
                 };
-                let result = main.handle(&self.net, other, now);
+                let result = main.handle(&self.net, other, now, self.settings.notifications);
                 let notices = std::mem::take(&mut main.notices);
                 for text in notices {
                     self.toast(text, now);
@@ -488,7 +492,13 @@ fn mode_for(dark: bool, high_contrast: bool) -> Mode {
 }
 
 impl Main {
-    fn handle(&mut self, net: &Net, reply: Reply, now: f64) -> Result<(), ClientError> {
+    fn handle(
+        &mut self,
+        net: &Net,
+        reply: Reply,
+        now: f64,
+        notifications: bool,
+    ) -> Result<(), ClientError> {
         match reply {
             Reply::Workspaces(result) => {
                 self.model.set_workspaces(result?);
@@ -610,13 +620,19 @@ impl Main {
                 members,
                 joined,
             } => self.devices_changed(channel, members, joined),
-            Reply::Realtime(event) => self.realtime(net, event, now),
+            Reply::Realtime(event) => self.realtime(net, event, now, notifications),
+            #[cfg(target_os = "linux")]
+            Reply::NotificationUnavailable => self
+                .notices
+                .push(tr("The system notification service is unavailable.").to_owned()),
             Reply::ServerInfo(..) | Reply::SignedIn(_) | Reply::Restored(_) | Reply::LoggedOut => {}
         }
         Ok(())
     }
 
-    fn realtime(&mut self, net: &Net, event: RealtimeEvent, now: f64) {
+    fn realtime(&mut self, net: &Net, event: RealtimeEvent, now: f64, notifications: bool) {
+        #[cfg(not(target_os = "linux"))]
+        let _ = notifications;
         match event {
             RealtimeEvent::Connecting { .. } => {
                 if self.model.connection != Connection::Connected {
@@ -630,6 +646,14 @@ impl Main {
                 }
             }
             RealtimeEvent::Event(event) => {
+                #[cfg(target_os = "linux")]
+                if notifications
+                    && matches!(&event, ServerEvent::MessageCreated { message } if self.model.should_notify(message))
+                    && self.last_notification.is_none_or(|last| now - last >= 10.0)
+                {
+                    self.last_notification = Some(now);
+                    net.notify(tr("You have a new message."));
+                }
                 let effects = self.model.apply(event, now);
                 self.run_effects(net, effects);
             }
@@ -1092,6 +1116,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
+        let focused = ctx.input(|i| i.focused);
+        if let Screen::Main(main) = &mut self.screen {
+            main.model.focused = focused;
+        }
         self.handle_replies(now);
         self.apply_appearance(&ctx);
 
@@ -1103,7 +1131,6 @@ impl eframe::App for App {
             self.decorated = Some(decorated);
         }
 
-        let focused = ctx.input(|i| i.focused);
         if let Screen::Main(main) = &mut self.screen {
             main.model.focused = focused;
             if focused && !self.was_focused {

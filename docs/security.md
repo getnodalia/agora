@@ -123,6 +123,15 @@ and configure that proxy to overwrite or safely append the header. Otherwise a d
 forge its address and evade per-address limits. Check the complete proxy chain's header behavior;
 a tunnel alone does not make arbitrary direct connections to the server port trustworthy.
 
+## Desktop notifications
+
+On Linux, an opt-in notification can be sent to the local desktop notification service for a new
+message in a joined channel that is not currently visible. The notification contains only a generic
+message; it does not include the sender, channel or decrypted content. Notifications are limited to
+one every ten seconds. The service and the operating system may retain or display these alerts.
+There is no notification for messages received while the app is closed, and this implementation
+does not yet support notifications on macOS or Windows or a taskbar badge.
+
 ## Logs
 
 The server logs events with ids (`account created user=2`), never passwords, tokens, invitation

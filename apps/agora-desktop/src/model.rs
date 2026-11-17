@@ -476,6 +476,20 @@ impl Model {
         effects
     }
 
+    /// Only new messages in joined channels that are not being viewed need an OS alert.
+    #[cfg(any(target_os = "linux", test))]
+    pub fn should_notify(&self, message: &Message) -> bool {
+        if message.author.id == self.me.id
+            || (self.focused && self.channel == Some(message.channel_id))
+        {
+            return false;
+        }
+        self.channel_info(message.channel_id)
+            .is_some_and(|channel| {
+                channel.joined && channel.last_message_id.is_none_or(|last| message.id > last)
+            })
+    }
+
     fn message_created(&mut self, message: Message, effects: &mut Vec<Effect>) {
         let mine = message.author.id == self.me.id;
         if mine {
@@ -621,6 +635,26 @@ mod tests {
             vec![channel(10, "general"), channel(11, "random")],
         );
         m
+    }
+
+    #[test]
+    fn notifications_ignore_own_seen_unknown_and_old_messages() {
+        let mut m = model();
+        let other = user(2, "luis");
+        let msg = message(5, 10, &other, "private");
+        assert!(m.should_notify(&msg));
+        m.channel = Some(ChannelId(10));
+        assert!(!m.should_notify(&msg));
+        m.focused = false;
+        assert!(m.should_notify(&msg));
+        assert!(!m.should_notify(&message(6, 10, &m.me, "mine")));
+        assert!(!m.should_notify(&message(6, 999, &other, "unknown")));
+        m.channel_info_mut(ChannelId(10)).unwrap().joined = false;
+        assert!(!m.should_notify(&msg));
+        m.channel_info_mut(ChannelId(10)).unwrap().joined = true;
+        m.channel_info_mut(ChannelId(10)).unwrap().last_message_id = Some(MessageId(5));
+        assert!(!m.should_notify(&msg));
+        assert!(m.should_notify(&message(6, 10, &other, "new")));
     }
 
     #[test]
