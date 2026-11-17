@@ -46,6 +46,8 @@ pub struct Settings {
     pub remember: bool,
     /// Show the context panel on the right.
     pub context_panel: bool,
+    /// Generic OS notifications on supported systems; no message text.
+    pub notifications: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
             language: None,
             remember: true,
             context_panel: true,
+            notifications: false,
         }
     }
 }

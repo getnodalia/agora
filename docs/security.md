@@ -118,6 +118,15 @@ per account (1200), typing notices (30); at most 16 WebSockets per account. All 
 `agora.toml` (`[limits]`). Behind a proxy, set `trust_proxy = true` so the address comes from
 `X-Forwarded-For`; without a proxy that header is ignored.
 
+## Desktop notifications
+
+On Linux, an opt-in notification can be sent to the local desktop notification service for a new
+message in a joined channel that is not currently visible. The notification contains only a generic
+message; it does not include the sender, channel or decrypted content. Notifications are limited to
+one every ten seconds. The service and the operating system may retain or display these alerts.
+There is no notification for messages received while the app is closed, and this implementation
+does not yet support notifications on macOS or Windows or a taskbar badge.
+
 ## Logs
 
 The server logs events with ids (`account created user=2`), never passwords, tokens, invitation

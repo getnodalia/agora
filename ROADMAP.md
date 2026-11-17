@@ -23,7 +23,8 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 
 - A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
 - A container image for the server, and server packages for ARM (Raspberry Pi).
-- Notifications from the operating system, and the unread count on the app icon.
+- Native notifications on macOS and Windows, and unread indicators on the app icon. Linux has an
+  opt-in generic notification for live messages; desktop integration still needs platform testing.
 - Files and images, with size limits and stored outside the database.
 - Account settings: change password and display name, sign out other sessions, delete account.
 - Workspace administration in the app: roles, removing people, archiving channels.
