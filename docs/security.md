@@ -126,7 +126,9 @@ terms; keep production at `info` (the default).
 
 ## Known limits
 
-- No two-factor sign-in, password reset by email or account deletion yet.
+- No two-factor sign-in, password reset by email or account deletion yet. The server contains
+  building blocks for TOTP and protected secrets, but they are not connected to accounts, session
+  restrictions, recovery or key management and provide no MFA protection in this version.
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end
   encryption".
