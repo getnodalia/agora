@@ -39,11 +39,6 @@ pub fn router() -> Router<AppState> {
         .route("/workspaces/join", post(workspaces::join))
         .route("/workspaces/{id}", get(workspaces::get_one))
         .route("/workspaces/{id}/members", get(workspaces::members))
-        .route(
-            "/workspaces/{id}/tasks",
-            get(tasks::list).post(tasks::create),
-        )
-        .route("/workspaces/{id}/tasks/{task_id}", put(tasks::update))
         .route("/workspaces/{id}/invites", post(workspaces::create_invite))
         .route(
             "/workspaces/{id}/channels",
