@@ -140,8 +140,8 @@ terms; keep production at `info` (the default).
 
 ## Known limits
 
-- No two-factor sign-in, password reset by email or account deletion yet. MFA storage primitives
-  exist but are not connected to account enrollment, login, session restrictions, key management
+- No two-factor sign-in, password reset by email or account deletion yet. MFA cryptography and
+  storage primitives are not connected to enrollment, login, session restrictions, key management
   or recovery UI; they do not enforce MFA in this version.
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end
