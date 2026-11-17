@@ -134,6 +134,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upgrade_preserves_existing_account_and_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let migrations = dir.path().join("old-migrations");
+        std::fs::create_dir(&migrations).unwrap();
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        for name in [
+            "0001_initial.sql",
+            "0002_end_to_end.sql",
+            "0003_server_initialization.sql",
+            "0004_tasks.sql",
+            "0005_organizations.sql",
+        ] {
+            std::fs::copy(source.join(name), migrations.join(name)).unwrap();
+        }
+        let db = format!("sqlite://{}", dir.path().join("old.db").display());
+        let options = db
+            .parse::<sqlx::sqlite::SqliteConnectOptions>()
+            .unwrap()
+            .create_if_missing(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::migrate::Migrator::new(migrations.as_path())
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES (1, 'ana', 'Ana', 'hash', 1)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, 1, 1, 200, 1)")
+            .bind([9u8; 32].as_slice()).execute(&pool).await.unwrap();
+        pool.close().await;
+
+        let store = Store::open(&db).await.unwrap();
+        assert!(store.totp_factor(UserId(1)).await.unwrap().is_none());
+        let session_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sessions WHERE user_id = 1 AND token_hash = ?",
+        )
+        .bind([9u8; 32].as_slice())
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(session_count, 1);
+        store.close().await;
+    }
+
+    #[tokio::test]
     async fn enrollment_is_atomic_and_does_not_replace_existing_factors() {
         let (_dir, store, user) = fixture().await;
         let duplicates = [[7u8; 32]; 10];
