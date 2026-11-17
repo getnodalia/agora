@@ -8,6 +8,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod hub;
+pub mod integrations;
 pub mod limiter;
 pub mod routes;
 pub mod state;
