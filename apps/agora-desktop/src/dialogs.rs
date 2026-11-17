@@ -208,6 +208,37 @@ fn organization_role_label(role: Role) -> &'static str {
     }
 }
 
+fn github_event_label(event: &str) -> &str {
+    match event {
+        "pull_request" => tr("Pull request"),
+        "issues" => tr("Issue"),
+        "issue_comment" | "pull_request_review_comment" => tr("Comment"),
+        "pull_request_review" => tr("Review"),
+        "workflow_run" | "check_run" | "check_suite" => tr("Build or check"),
+        "release" => tr("Release"),
+        "push" | "create" | "delete" => tr("Repository change"),
+        "dependabot_alert" | "code_scanning_alert" | "secret_scanning_alert" => {
+            tr("Security alert")
+        }
+        "ping" => tr("Connection test"),
+        _ => event,
+    }
+}
+
+fn github_action_label(action: &str) -> &str {
+    match action {
+        "opened" => tr("Opened"),
+        "closed" => tr("Closed"),
+        "reopened" => tr("Reopened"),
+        "created" => tr("Created"),
+        "edited" => tr("Edited"),
+        "completed" => tr("Completed"),
+        "published" => tr("Published"),
+        "deleted" => tr("Deleted"),
+        _ => action,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn body(
     ui: &mut Ui,
@@ -245,8 +276,13 @@ fn body(
                             let number = event
                                 .object_number
                                 .map_or_else(String::new, |n| format!(" #{n}"));
-                            let action = event.action.as_deref().unwrap_or("");
-                            ui.label(format!("{}{} · {}", event.event, number, action));
+                            let action = event.action.as_deref().map(github_action_label);
+                            let title = format!("{}{number}", github_event_label(&event.event));
+                            let detail = action.map_or_else(String::new, |a| format!(" · {a}"));
+                            ui.label(format!(
+                                "{title}{detail} · {}",
+                                view::date(event.received_at)
+                            ));
                         }
                     });
             }
