@@ -124,6 +124,61 @@ pub struct UpdateProfileRequest {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Workspace tasks (server-readable, separate from encrypted messages)
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Task {
+    pub id: i64,
+    pub workspace_id: WorkspaceId,
+    pub title: String,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
+    pub assignee_id: Option<UserId>,
+    pub due_at: Option<Timestamp>,
+    pub created_by: UserId,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub revision: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Todo,
+    InProgress,
+    Done,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskPriority {
+    Low,
+    Normal,
+    High,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateTaskRequest {
+    pub title: String,
+    pub priority: TaskPriority,
+    pub assignee_id: Option<UserId>,
+    pub due_at: Option<Timestamp>,
+    /// Must be true: task data is readable by the server and workspace members.
+    pub acknowledge_server_readable: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpdateTaskRequest {
+    pub title: String,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
+    pub assignee_id: Option<UserId>,
+    pub due_at: Option<Timestamp>,
+    /// The revision read by the client; concurrent edits otherwise return conflict.
+    pub revision: i64,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Workspaces
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

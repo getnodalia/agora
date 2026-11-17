@@ -135,3 +135,10 @@ terms; keep production at `info` (the default).
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end
   encryption".
+
+## Workspace task API
+
+The experimental task API stores titles, status, priority, assignment and due dates as
+server-readable SQLite data. Owners, admins and members can read and edit tasks in their workspace;
+guests and non-members cannot. Tasks are not MLS messages and do not inherit message encryption.
+The API requires an explicit acknowledgement on creation and does not copy text from messages.

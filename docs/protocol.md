@@ -65,3 +65,21 @@ Server events: `ready {user}`, `error {code, message}`, `message_created`, `mess
 Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last
 message it has, which is how nothing is lost while it was away.
+
+### Workspace tasks (experimental API)
+
+Tasks are independent of messages. The server stores task titles and metadata in plaintext;
+workspace owners, admins and members can read and edit all tasks in that workspace. Guests and
+non-members cannot access this API. It does not retrieve or copy encrypted messages. Clients must
+explain this privacy boundary and obtain the user's explicit acknowledgement before creation.
+
+- `GET /workspaces/{id}/tasks?after=<id>` returns at most 100 tasks ordered by ascending id;
+  pass the final id to retrieve the next page.
+- `POST /workspaces/{id}/tasks` accepts `title`, `priority` (`low`, `normal`, `high`), optional
+  `assignee_id` and `due_at` (UTC milliseconds), and requires `acknowledge_server_readable: true`.
+- `PUT /workspaces/{id}/tasks/{task_id}` replaces those fields plus `status` (`todo`,
+  `in_progress`, `done`) and `revision`. A stale revision returns 409; reload before retrying.
+
+This is an API foundation only. The desktop app, comments, message links, live updates and offline
+sync are not implemented. Do not put confidential message text into a task without the user's
+explicit decision and a clear explanation of the different privacy guarantees.
