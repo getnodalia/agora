@@ -9,6 +9,7 @@ pub mod config;
 pub mod error;
 pub mod hub;
 pub mod limiter;
+pub mod mfa_crypto;
 pub mod routes;
 pub mod state;
 pub mod ws;
