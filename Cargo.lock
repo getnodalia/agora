@@ -240,6 +240,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures-util",
+ "hmac 0.12.1",
  "png 0.17.16",
  "rand 0.8.8",
  "reqwest",
