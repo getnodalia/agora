@@ -962,7 +962,7 @@ fn message_item(
                     );
                 });
             } else {
-                widgets::message_body(ui, look, &message.body, &me.username);
+                message_content(ui, look, &message.body, &me.username, actions);
                 if message.edited_at.is_some() {
                     ui.label(
                         RichText::new(tr("(edited)"))
@@ -1095,7 +1095,11 @@ fn toolbar(
             if threads && icon_button(ui, look, "reply", tr("Reply in thread"), false).clicked() {
                 actions.push(Action::OpenThread(message.id));
             }
-            if mine && icon_button(ui, look, "pencil", tr("Edit"), false).clicked() {
+            let text = matches!(
+                agora_core::content::parse(&message.body),
+                agora_core::content::Content::Text(_)
+            );
+            if mine && text && icon_button(ui, look, "pencil", tr("Edit"), false).clicked() {
                 actions.push(Action::Dialog(Dialog::Edit {
                     id: message.id,
                     body: message.body.clone(),
@@ -1138,6 +1142,112 @@ fn reactions(ui: &mut Ui, look: &Look, message: &Message, me: UserId, actions: &
     });
 }
 
+/// What a decrypted message carries: text, a file, or earlier messages shared with newcomers.
+fn message_content(ui: &mut Ui, look: &Look, body: &str, me: &str, actions: &mut Vec<Action>) {
+    use agora_core::content::{parse, Content};
+    match parse(body) {
+        Content::Text(text) => widgets::message_body(ui, look, text, me),
+        Content::File {
+            attachment,
+            caption,
+        } => {
+            if widgets::file_card(ui, look, &attachment) {
+                actions.push(Action::SaveFile(attachment.clone()));
+            }
+            if !caption.is_empty() {
+                widgets::message_body(ui, look, caption, me);
+            }
+        }
+        Content::History(messages) => {
+            let p = &look.palette;
+            egui::Frame::NONE
+                .fill(color(p.surface_sunken))
+                .corner_radius(10)
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    let id = Id::unique(("agora-history", body));
+                    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+                    let mut header = false;
+                    ui.horizontal(|ui| {
+                        icon(ui, "history", 14.0, color(p.text_secondary));
+                        let label = trf(
+                            "Earlier messages shared with new members ({})",
+                            &[&messages.len().to_string()],
+                        );
+                        header |= ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(label)
+                                        .size(font_size::SMALL)
+                                        .strong()
+                                        .color(color(p.text_secondary)),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked();
+                        let chevron = if open { "chevron-up" } else { "chevron-down" };
+                        header |=
+                            icon_button(ui, look, chevron, tr("Show or hide"), false).clicked();
+                    });
+                    if header {
+                        open = !open;
+                        ui.data_mut(|d| d.insert_temp(id, open));
+                    }
+                    if !open {
+                        return;
+                    }
+                    for shared in &messages {
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(&shared.author)
+                                    .strong()
+                                    .color(color(p.text_primary)),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} · {}",
+                                    date(shared.at),
+                                    clock(shared.at)
+                                ))
+                                .size(font_size::CAPTION)
+                                .color(color(p.text_tertiary)),
+                            );
+                        });
+                        match parse(&shared.body) {
+                            Content::File {
+                                attachment,
+                                caption,
+                            } => {
+                                if widgets::file_card(ui, look, &attachment) {
+                                    actions.push(Action::SaveFile(attachment.clone()));
+                                }
+                                if !caption.is_empty() {
+                                    widgets::message_body(ui, look, caption, me);
+                                }
+                            }
+                            _ => widgets::message_body(ui, look, &shared.body, me),
+                        }
+                    }
+                });
+        }
+    }
+}
+
+/// One line for lists and notifications, in the person's language.
+pub fn preview(body: &str, max: usize) -> String {
+    use agora_core::content::{parse, Content};
+    match parse(body) {
+        Content::Text(text) => agora_core::format::preview(text, max),
+        Content::File { attachment, .. } => format!("📎 {}", attachment.name),
+        Content::History(messages) => trf(
+            "Earlier messages shared with new members ({})",
+            &[&messages.len().to_string()],
+        ),
+    }
+}
+
 fn pending_list(
     ui: &mut Ui,
     look: &Look,
@@ -1158,7 +1268,7 @@ fn pending_list(
                         .strong()
                         .color(color(p.text_secondary)),
                 );
-                ui.label(RichText::new(&item.body).color(color(p.text_secondary)));
+                ui.label(RichText::new(preview(&item.body, 300)).color(color(p.text_secondary)));
                 if item.failed {
                     ui.horizontal(|ui| {
                         if ui
@@ -1278,46 +1388,75 @@ fn composer(
     let id = Id::unique(("composer", channel.0, thread.map(|t| t.0)));
     let focused = ui.memory(|m| m.has_focus(id));
     let send_key = focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
+    // Files dropped on the window go to the conversation open in the middle.
+    let hovering =
+        thread.is_none() && main.dialog.is_none() && ui.input(|i| !i.raw.hovered_files.is_empty());
+    if thread.is_none() && main.dialog.is_none() {
+        let dropped: Vec<std::path::PathBuf> = ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            actions.push(Action::SendFiles {
+                channel,
+                thread,
+                paths: dropped,
+            });
+        }
+    }
     let draft = main.drafts.entry((channel, thread)).or_default();
     let mut send = send_key;
-    cr::field_frame(look)
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let width = ui.available_width() - 36.0;
-                let response = ui.add(
-                    TextEdit::multiline(draft)
-                        .id(id)
-                        .frame(egui::Frame::NONE)
-                        .hint_text(hint)
-                        .desired_rows(1)
-                        .desired_width(width)
-                        .lock_focus(true)
-                        .return_key(Some(egui::KeyboardShortcut::new(
-                            Modifiers::SHIFT,
-                            Key::Enter,
-                        ))),
-                );
-                if response.changed() && !draft.trim().is_empty() {
-                    actions.push(Action::Typing { channel, thread });
+    let mut frame = cr::field_frame(look).inner_margin(Margin::symmetric(10, 6));
+    if hovering {
+        frame = frame.stroke(egui::Stroke::new(2.0, color(look.palette.border_focus)));
+    }
+    let hint = if hovering {
+        tr("Drop the files to send them")
+    } else {
+        hint
+    };
+    frame.show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let width = ui.available_width() - 68.0;
+            let response = ui.add(
+                TextEdit::multiline(draft)
+                    .id(id)
+                    .frame(egui::Frame::NONE)
+                    .hint_text(hint)
+                    .desired_rows(1)
+                    .desired_width(width)
+                    .lock_focus(true)
+                    .return_key(Some(egui::KeyboardShortcut::new(
+                        Modifiers::SHIFT,
+                        Key::Enter,
+                    ))),
+            );
+            if response.changed() && !draft.trim().is_empty() {
+                actions.push(Action::Typing { channel, thread });
+            }
+            let wants_focus = if thread.is_some() {
+                false
+            } else {
+                main.focus_composer
+            };
+            if wants_focus && main.dialog.is_none() {
+                response.request_focus();
+                main.focus_composer = false;
+            }
+            ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+                if icon_button(ui, look, "send", tr("Send"), !draft.trim().is_empty()).clicked() {
+                    send = true;
                 }
-                let wants_focus = if thread.is_some() {
-                    false
-                } else {
-                    main.focus_composer
-                };
-                if wants_focus && main.dialog.is_none() {
-                    response.request_focus();
-                    main.focus_composer = false;
+                if icon_button(ui, look, "attach", tr("Send files"), false).clicked() {
+                    actions.push(Action::AttachFiles { channel, thread });
                 }
-                ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                    if icon_button(ui, look, "send", tr("Send"), !draft.trim().is_empty()).clicked()
-                    {
-                        send = true;
-                    }
-                });
             });
         });
+    });
     if send {
         actions.push(Action::Send { channel, thread });
     }
@@ -1486,8 +1625,7 @@ fn search_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action>
                 );
                 child.add(
                     egui::Label::new(
-                        RichText::new(agora_core::format::preview(&m.body, 140))
-                            .color(color(p.text_primary)),
+                        RichText::new(preview(&m.body, 140)).color(color(p.text_primary)),
                     )
                     .truncate(),
                 );
@@ -1573,6 +1711,20 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                                         invite: None,
                                         uses: 5,
                                         hours: 168,
+                                    }));
+                                }
+                                if c.joined
+                                    && cr::secondary_button(
+                                        ui,
+                                        look,
+                                        tr("Share earlier messages"),
+                                        true,
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(Action::Dialog(Dialog::ShareHistory {
+                                        channel: c.id,
+                                        count: 50,
                                     }));
                                 }
                                 if c.joined

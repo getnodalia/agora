@@ -4,6 +4,7 @@
 //! backoff and reporting what happens through a callback. Neither touches a UI toolkit: the
 //! desktop app, tests and future web or mobile clients share them.
 
+pub mod files;
 pub mod realtime;
 pub mod secure;
 
@@ -32,6 +33,9 @@ pub enum ClientError {
     /// End-to-end encryption failed on this device (keys, storage, a damaged message).
     #[error("encryption failed: {0}")]
     Encryption(String),
+    /// Something on this computer failed: a file could not be read or written.
+    #[error("{0}")]
+    Local(String),
 }
 
 impl ClientError {
@@ -141,11 +145,23 @@ impl Client {
         body: Option<&B>,
     ) -> Result<T> {
         let mut req = self.http.request(method, url);
-        if let Some(token) = &self.token {
-            req = req.bearer_auth(token);
-        }
         if let Some(body) = body {
             req = req.json(body);
+        }
+        let bytes = self.execute(req).await?;
+        let bytes = if bytes.is_empty() {
+            &b"null"[..]
+        } else {
+            &bytes[..]
+        };
+        serde_json::from_slice(bytes).map_err(|e| ClientError::Decode(e.to_string()))
+    }
+
+    /// Send a request with this session's token; the body of a successful answer, or the
+    /// server's error.
+    async fn execute(&self, mut req: reqwest::RequestBuilder) -> Result<Vec<u8>> {
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
         }
         let res = req
             .send()
@@ -171,12 +187,7 @@ impl Client {
                 error,
             });
         }
-        let bytes = if bytes.is_empty() {
-            &b"null"[..]
-        } else {
-            &bytes[..]
-        };
-        serde_json::from_slice(bytes).map_err(|e| ClientError::Decode(e.to_string()))
+        Ok(bytes.to_vec())
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -458,6 +469,28 @@ impl Client {
             },
         )
         .await
+    }
+
+    /// Store an encrypted file for a channel. `ciphertext` must already be encrypted: use
+    /// [`Secure::send_file`] to send a file in a message.
+    pub async fn upload_file(
+        &self,
+        channel: ChannelId,
+        ciphertext: Vec<u8>,
+    ) -> Result<UploadedFile> {
+        let req = self
+            .http
+            .post(self.url(&format!("/channels/{channel}/files"))?)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(ciphertext);
+        let bytes = self.execute(req).await?;
+        serde_json::from_slice(&bytes).map_err(|e| ClientError::Decode(e.to_string()))
+    }
+
+    /// An encrypted file's bytes, as stored.
+    pub async fn download_file(&self, id: i64) -> Result<Vec<u8>> {
+        self.execute(self.http.get(self.url(&format!("/files/{id}"))?))
+            .await
     }
 
     /// How far each member has received and read a channel.

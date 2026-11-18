@@ -12,6 +12,7 @@
 
 pub mod backup;
 mod channels;
+mod files;
 pub mod github_events;
 pub mod messages;
 pub mod mfa;

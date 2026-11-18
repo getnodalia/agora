@@ -19,13 +19,22 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
   The Linux server ships on its own too (tarball with `install.sh`, `.deb`, `.rpm`), with a systemd
   service, its user and its configuration. Merging a version bump with its notes releases it.
 
+## Done since 0.1.4
+
+- Two-step verification (TOTP with recovery codes) and a security dialog with the account's
+  devices; signing out and back in on the same computer keeps the same device and its history.
+- Sent, delivered and read ticks, with who has read a message.
+- Files of any kind, encrypted on the device with their own key (100 MB by default, stored in the
+  database for now), sent by picking or dropping them.
+- Sharing earlier messages with people who joined a conversation later, by choice of a member.
+
 ## Next: usable by a small team
 
 - A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
 - A container image for the server, and server packages for ARM (Raspberry Pi).
 - Native notifications on macOS and Windows, and unread indicators on the app icon. Linux has an
   opt-in generic notification for live messages; desktop integration still needs platform testing.
-- Files and images, with size limits and stored outside the database.
+- Image previews in messages, and files stored outside the database.
 - Account settings: change password and display name, sign out other sessions, delete account.
 - Workspace administration in the app: roles, removing people, archiving channels.
 - Global menu over D-Bus on Linux, like every Nodalia app.
@@ -34,7 +43,7 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 
 - PostgreSQL as a second storage backend (the storage crate keeps SQL in one place for this).
 - A web client from the same Rust code (WebAssembly), and mobile apps.
-- Two-factor sign-in, single sign-on.
+- Single sign-on, and a server-wide requirement for two-step verification.
 - Voice and video calls.
 - Verified identities for end-to-end encryption (cross-signed devices, a safety number per
   person), so a server cannot add a device unnoticed; reading old messages on a new device by

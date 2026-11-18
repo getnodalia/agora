@@ -499,6 +499,39 @@ impl Secure {
         Err(last.unwrap_or(ClientError::Encryption("could not send".into())))
     }
 
+    /// Encrypt a file, upload it and send a message that carries its key, with an optional
+    /// caption. The server holds the file's ciphertext and never its key.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_file(
+        &self,
+        channel: ChannelId,
+        name: &str,
+        mime: &str,
+        data: &[u8],
+        caption: &str,
+        nonce: &str,
+        thread_root_id: Option<MessageId>,
+    ) -> Result<Message> {
+        let (sealed, key) = crate::files::seal(data)?;
+        let uploaded = self.client.upload_file(channel, sealed).await?;
+        let attachment = agora_core::content::Attachment {
+            file: uploaded.id,
+            name: agora_core::content::safe_file_name(name),
+            size: u64::try_from(data.len()).unwrap_or(u64::MAX),
+            mime: mime.chars().take(100).collect(),
+            key,
+        };
+        let body = agora_core::content::file_message(&attachment, caption);
+        self.post(channel, &body, nonce, thread_root_id, Vec::new())
+            .await
+    }
+
+    /// Download and decrypt a file a message carries.
+    pub async fn open_file(&self, attachment: &agora_core::content::Attachment) -> Result<Vec<u8>> {
+        let data = self.client.download_file(attachment.file).await?;
+        crate::files::open(&data, &attachment.key)
+    }
+
     /// Encrypt and send a new text for one of this person's messages.
     pub async fn edit(
         &self,

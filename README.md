@@ -63,6 +63,9 @@ stores only ciphertext.
     <td><sub><b>End-to-end encryption</b>: the details panel lists the devices that can read a conversation, with fingerprints to compare in person.</sub></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/screenshots/files-and-shared-history.png" alt="Someone who joined later reads earlier messages a member shared, and saves an encrypted file"><br><sub><b>Files and shared history</b>: files travel encrypted, and a member can share earlier messages with someone who joined later.</sub></td>
+  </tr>
+  <tr>
     <td colspan="2"><img src="docs/screenshots/new-device.png" alt="A laptop signed in later: what was said before it joined stays encrypted, what follows it reads"><br><sub><b>A new device</b>: what was said before it joined stays encrypted, what follows it reads.</sub></td>
   </tr>
 </table>
@@ -82,6 +85,13 @@ stores only ciphertext.
   OpenMLS): the server keeps only ciphertext. Each device has its own keys and reads from when it
   was added; the details panel lists the devices that can read a conversation with their
   fingerprints.
+- **Files of any kind**, encrypted on your device before they leave it: attach them or drop them
+  on the window, and save them from the message. The server keeps bytes it cannot open.
+- **Earlier messages for newcomers**: someone who joins later cannot read what came before, so a
+  member can choose to share the newest messages with everyone in the conversation now.
+- **Sent, delivered and read** ticks on your messages, with who has read them.
+- **Two-step verification** with an authenticator app and recovery codes, and the devices signed
+  in to your account, which stay the same device when you sign out and back in.
 - **Real time** over an authenticated WebSocket: new messages, edits, reactions, typing, presence,
   read markers across your devices; the client reconnects with backoff and catches up.
 - **Unread counts and mentions** per channel and workspace, with a "New messages" line.
@@ -90,7 +100,7 @@ stores only ciphertext.
   panel), light, dark and high-contrast themes, reduced motion, keyboard shortcuts, Spanish and
   English, NDL window controls on Linux and native ones on macOS and Windows.
 
-Not yet: file uploads, voice and video, notifications from the operating system, a web client,
+Not yet: voice and video, notifications from the operating system, a web client,
 mobile apps, PostgreSQL, federation, verified device identities. See [ROADMAP.md](ROADMAP.md).
 
 ## Download

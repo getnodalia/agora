@@ -37,6 +37,8 @@ Authenticated requests carry `Authorization: Bearer <token>`. Errors are
 | `POST /channels/{id}/read` | `{message_id}`: move the read marker (reading counts as received) |
 | `POST /channels/{id}/delivered` | `{message_id}`: one of the caller's devices received the messages up to this one |
 | `GET /channels/{id}/receipts` | `[{user_id, delivered_id, read_id}]`: how far each member has received and read the channel |
+| `POST /channels/{id}/files` | Raw body: a file the client already encrypted → `201 {id, size}`. At most `max_file_bytes` (100 MB by default) |
+| `GET /files/{id}` | The encrypted bytes of a file, for anyone who can read its channel |
 | `GET /channels/{id}/messages?before=&after=&limit=` | History, oldest first, top-level messages only |
 | `POST /channels/{id}/messages` | `{ciphertext, mentions, client_nonce, thread_root_id?}`, `body` empty; a repeated nonce returns the stored message |
 | `PATCH /messages/{id}`, `DELETE …` | Edit (author, `{ciphertext, mentions}`) or delete (author or moderator) |
@@ -60,6 +62,11 @@ Binary fields are base64. The server checks group ids, epochs and that a key pac
 the device publishing it, which it can do without any key; it never decrypts. A message or edit
 whose ciphertext is not an MLS application message of this conversation's group at its current
 epoch is refused.
+
+A file travels in two parts. The client encrypts it with a fresh AES-256-GCM key, uploads the
+result, and then sends an ordinary end-to-end encrypted message whose text names the upload,
+the file name, size and type, and the key. A message can also carry a copy of earlier messages
+for people who joined after them. The formats of both are in `agora_core::content`.
 
 `GET /healthz` (outside the prefix) answers `ok` for load balancers.
 

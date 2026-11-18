@@ -4,6 +4,7 @@
 pub mod accounts;
 pub mod channels;
 pub mod e2e;
+pub mod files;
 pub mod github;
 pub mod messages;
 pub mod mfa;
@@ -95,6 +96,11 @@ pub fn router() -> Router<AppState> {
         .route("/channels/{id}/members", post(channels::add_member))
         .route("/channels/{id}/read", post(channels::mark_read))
         .route("/channels/{id}/delivered", post(channels::mark_delivered))
+        .route(
+            "/channels/{id}/files",
+            post(files::upload).layer(DefaultBodyLimit::max(crate::config::FILE_HARD_MAX_BYTES)),
+        )
+        .route("/files/{id}", get(files::download))
         .route("/channels/{id}/receipts", get(channels::receipts))
         .route("/channels/{id}/mls", get(e2e::state))
         .route("/channels/{id}/mls/group", post(e2e::create_group))
