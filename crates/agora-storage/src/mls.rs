@@ -69,7 +69,71 @@ pub(crate) async fn append(
     .await?)
 }
 
+/// How long a signed-out device stays in its conversations, so signing back in on the same
+/// computer picks up where it left off.
+pub const DETACHED_DEVICE_DAYS: i64 = 90;
+
+/// One of a person's devices, for them to review and remove.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnDevice {
+    pub public_key: Vec<u8>,
+    pub created_at: Timestamp,
+    pub last_seen_at: Timestamp,
+    pub session_id: Option<i64>,
+}
+
 impl Store {
+    /// A person's devices that still count (signed in, or signed out recently), newest first.
+    pub async fn own_devices(&self, user: UserId, now: Timestamp) -> Result<Vec<OwnDevice>> {
+        let rows: Vec<(Vec<u8>, i64, i64, Option<i64>)> = sqlx::query_as(
+            "SELECT d.public_key, d.created_at, d.last_seen_at, d.session_id FROM devices d
+             LEFT JOIN sessions s ON s.id = d.session_id
+             WHERE d.user_id = ? AND (s.expires_at > ? OR (d.session_id IS NULL AND d.last_seen_at > ?))
+             ORDER BY d.last_seen_at DESC",
+        )
+        .bind(user.0)
+        .bind(now)
+        .bind(now.saturating_sub(DETACHED_DEVICE_DAYS * 86_400_000))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(public_key, created_at, last_seen_at, session_id)| OwnDevice {
+                    public_key,
+                    created_at,
+                    last_seen_at,
+                    session_id,
+                },
+            )
+            .collect())
+    }
+
+    /// Remove one of `user`'s devices. Its session, if any, is deleted too (it is signed out);
+    /// that session id is returned so its sockets can be closed. `None` if no such device.
+    pub async fn remove_device(
+        &self,
+        user: UserId,
+        public_key: &[u8],
+    ) -> Result<Option<Option<i64>>> {
+        let mut tx = self.pool.begin().await?;
+        let session: Option<Option<i64>> = sqlx::query_scalar(
+            "DELETE FROM devices WHERE user_id = ? AND public_key = ? RETURNING session_id",
+        )
+        .bind(user.0)
+        .bind(public_key)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(Some(id)) = session {
+            sqlx::query("DELETE FROM sessions WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(session)
+    }
+
     /// Record the device of a session. A device seen before (same user) moves to this session;
     /// a session that had another device loses it. [`StoreError::Conflict`] if the key belongs
     /// to someone else.
@@ -95,18 +159,20 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         if owner.is_some() {
-            sqlx::query("UPDATE devices SET session_id = ? WHERE public_key = ?")
+            sqlx::query("UPDATE devices SET session_id = ?, last_seen_at = ? WHERE public_key = ?")
                 .bind(session)
+                .bind(now)
                 .bind(public_key)
                 .execute(&mut *tx)
                 .await?;
         } else {
             sqlx::query(
-                "INSERT INTO devices (public_key, user_id, session_id, created_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO devices (public_key, user_id, session_id, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
             )
             .bind(public_key)
             .bind(user.0)
             .bind(session)
+            .bind(now)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -190,11 +256,13 @@ impl Store {
         let mut out = Vec::new();
         for chunk in users.chunks(500) {
             let mut q: QueryBuilder<Sqlite> = QueryBuilder::new(
-                "SELECT d.user_id, d.public_key FROM devices d JOIN sessions s ON s.id = d.session_id
-                 WHERE s.expires_at > ",
+                "SELECT d.user_id, d.public_key FROM devices d LEFT JOIN sessions s ON s.id = d.session_id
+                 WHERE (s.expires_at > ",
             );
             q.push_bind(now);
-            q.push(" AND d.user_id IN (");
+            q.push(" OR (d.session_id IS NULL AND d.last_seen_at > ");
+            q.push_bind(now.saturating_sub(DETACHED_DEVICE_DAYS * 86_400_000));
+            q.push(")) AND d.user_id IN (");
             let mut sep = q.separated(", ");
             for u in chunk {
                 sep.push_bind(u.0);
@@ -342,5 +410,73 @@ impl Store {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok((entries, has_more))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod device_upgrade_tests {
+    use super::*;
+
+    /// Rebuilding `devices` must not cascade into key packages and welcomes, and a device then
+    /// survives the end of its session.
+    #[tokio::test]
+    async fn upgrade_keeps_key_packages_and_logout_keeps_the_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let migrations = dir.path().join("old");
+        std::fs::create_dir(&migrations).unwrap();
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        for entry in std::fs::read_dir(&source).unwrap() {
+            let name = entry.unwrap().file_name();
+            if name.to_string_lossy().as_ref() < "0009" {
+                std::fs::copy(source.join(&name), migrations.join(&name)).unwrap();
+            }
+        }
+        let db = format!("sqlite://{}", dir.path().join("old.db").display());
+        let options = db
+            .parse::<sqlx::sqlite::SqliteConnectOptions>()
+            .unwrap()
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::migrate::Migrator::new(migrations.as_path())
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        for q in [
+            "INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES (1, 'ana', 'Ana', 'h', 1)",
+            "INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (7, x'09', 1, 1, 9999999999999, 1)",
+            "INSERT INTO devices (public_key, user_id, session_id, created_at) VALUES (x'AA', 1, 7, 5)",
+            "INSERT INTO key_packages (device_key, data, created_at) VALUES (x'AA', x'01', 5)",
+        ] {
+            sqlx::query(q).execute(&pool).await.unwrap();
+        }
+        pool.close().await;
+
+        let store = Store::open(&db).await.unwrap();
+        assert_eq!(store.key_package_count(&[0xAA]).await.unwrap(), 1);
+        sqlx::query("DELETE FROM sessions WHERE id = 7")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let devices = store.own_devices(UserId(1), 10).await.unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].session_id, None);
+        assert_eq!(store.devices(&[UserId(1)], 10).await.unwrap().len(), 1);
+        // Long after it was last seen, it no longer counts.
+        let later = 5 + DETACHED_DEVICE_DAYS * 86_400_000 + 1;
+        assert!(store.devices(&[UserId(1)], later).await.unwrap().is_empty());
+        assert_eq!(
+            store.remove_device(UserId(1), &[0xAA]).await.unwrap(),
+            Some(None)
+        );
+        assert_eq!(store.key_package_count(&[0xAA]).await.unwrap(), 0);
+        store.close().await;
     }
 }

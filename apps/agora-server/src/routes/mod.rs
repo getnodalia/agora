@@ -6,6 +6,7 @@ pub mod channels;
 pub mod e2e;
 pub mod github;
 pub mod messages;
+pub mod mfa;
 pub mod organizations;
 pub mod tasks;
 pub mod workspaces;
@@ -36,7 +37,14 @@ pub fn router() -> Router<AppState> {
             "/auth/sessions/revoke-others",
             post(accounts::revoke_other_sessions),
         )
+        .route("/auth/mfa", get(mfa::status))
+        .route("/auth/mfa/setup", post(mfa::setup))
+        .route("/auth/mfa/enable", post(mfa::enable))
+        .route("/auth/mfa/disable", post(mfa::disable))
+        .route("/auth/mfa/recovery-codes", post(mfa::recovery_codes))
         .route("/me", get(accounts::me).patch(accounts::update_me))
+        .route("/devices", get(e2e::own_devices))
+        .route("/devices/remove", post(e2e::remove_device))
         .route("/devices/me", put(e2e::register_device))
         .route("/devices/me/key_packages", post(e2e::publish_key_packages))
         .route(

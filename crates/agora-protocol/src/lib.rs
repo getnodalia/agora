@@ -47,6 +47,9 @@ pub enum ErrorCode {
     /// The conversation's encryption moved on (a device joined or left) since the request was
     /// prepared: process the new log entries, then encrypt again.
     StaleEpoch,
+    /// The password was right and the account has two-step verification: send the login again
+    /// with `totp` or `recovery_code`.
+    MfaRequired,
     /// The server failed; the details are in its log.
     Internal,
 }
@@ -104,6 +107,54 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// The six-digit code from an authenticator app, when the account has two-step verification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp: Option<String>,
+    /// One of the account's single-use recovery codes, instead of `totp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_code: Option<String>,
+}
+
+/// Two-step verification (TOTP) for the signed-in account.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MfaStatus {
+    pub enabled: bool,
+    /// Unused recovery codes; 0 when disabled.
+    pub recovery_codes_left: u32,
+}
+
+/// Start enabling two-step verification. The password is asked again.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaSetupRequest {
+    pub password: String,
+}
+
+/// A new secret for the authenticator app. It is not active until confirmed with a code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaSetup {
+    /// Base32, for typing into an authenticator app.
+    pub secret: String,
+    /// `otpauth://totp/...`, for a QR code.
+    pub uri: String,
+}
+
+/// Confirm the pending secret with a current code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaCodeRequest {
+    pub code: String,
+}
+
+/// Turn two-step verification off: the password and a current code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaDisableRequest {
+    pub password: String,
+    pub code: String,
+}
+
+/// Recovery codes, shown once. Each signs in one time instead of a code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaRecoveryCodes {
+    pub recovery_codes: Vec<String>,
 }
 
 /// Reauthenticate before revoking all other sessions.
@@ -417,6 +468,26 @@ pub struct RegisterDeviceRequest {
 pub struct DeviceStatus {
     /// Key packages left for others to add this device with. Publish more when it runs low.
     pub key_packages: u32,
+}
+
+/// One of your devices: a computer that can read your conversations.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnDevice {
+    /// The MLS signing key, base64. Compare its fingerprint with what others see.
+    pub public_key: String,
+    pub created_at: Timestamp,
+    pub last_seen_at: Timestamp,
+    /// The device making this request.
+    pub this_device: bool,
+    /// Signed in now. A signed-out device keeps its place in conversations for a while, so
+    /// signing in again on the same computer shows everything.
+    pub signed_in: bool,
+}
+
+/// Remove one of your devices: it is signed out and leaves every conversation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RemoveDeviceRequest {
+    pub public_key: String,
 }
 
 /// One-use key packages for this session's device, base64.

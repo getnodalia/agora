@@ -266,9 +266,12 @@ async fn backup(config: &Config, installed: &Version) -> Result<Option<PathBuf>,
         .map_or(0, |d| d.as_secs());
     let dest = dir.join(format!("before-update-{installed}-{stamp}.db"));
     agora_storage::backup::create(&config.database, &dest).await?;
-    let mut key = db.clone().into_os_string();
-    key.push(".mfa-key");
-    let key = PathBuf::from(key);
+    // The two-step verification key: without it the backup's sealed secrets are unreadable.
+    let key = config.mfa_key_file.clone().unwrap_or_else(|| {
+        let mut key = db.clone().into_os_string();
+        key.push(".mfa-key");
+        PathBuf::from(key)
+    });
     if key.is_file() {
         let mut copy = dest.clone().into_os_string();
         copy.push(".mfa-key");

@@ -180,9 +180,15 @@ fn top_bar(
                 if ui.button(tr("About Ágora")).clicked() {
                     actions.push(Action::Dialog(Dialog::About));
                 }
+                if ui.button(tr("Security and devices")).clicked() {
+                    actions.push(Action::Security(crate::security::SecurityAction::Load));
+                }
                 ui.separator();
                 if ui.button(tr("Log out")).clicked() {
                     actions.push(Action::Logout);
+                }
+                if ui.button(tr("Log out and forget this computer")).clicked() {
+                    actions.push(Action::LogoutForget);
                 }
             });
             ui.add_space(4.0);
