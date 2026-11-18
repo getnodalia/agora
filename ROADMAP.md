@@ -27,6 +27,7 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 - Files of any kind, encrypted on the device with their own key (100 MB by default, stored in the
   database for now), sent by picking or dropping them.
 - Sharing earlier messages with people who joined a conversation later, by choice of a member.
+- The Linux global menu over D-Bus: Ágora's commands in the top bar of desktops that show one.
 
 ## Next: usable by a small team
 
@@ -37,7 +38,6 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 - Image previews in messages, and files stored outside the database.
 - Account settings: change password and display name, sign out other sessions, delete account.
 - Workspace administration in the app: roles, removing people, archiving channels.
-- Global menu over D-Bus on Linux, like every Nodalia app.
 
 ## Later
 

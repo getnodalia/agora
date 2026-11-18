@@ -19,6 +19,8 @@ mod chrome;
 mod dialogs;
 mod i18n;
 mod icon;
+#[cfg(target_os = "linux")]
+mod linux_menu;
 mod model;
 mod net;
 mod security;
