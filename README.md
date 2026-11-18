@@ -46,7 +46,7 @@ Every channel and direct message is **end-to-end encrypted** with MLS (RFC 9420)
 stores only ciphertext.
 
 > [!IMPORTANT]
-> **Ágora is at an early stage (0.1).** Everything under [Features](#features) is implemented and
+> **Ágora is at an early stage (0.2).** Everything under [Features](#features) is implemented and
 > tested against a real server, but the protocol may still change before 1.0. The server still
 > sees who talks to whom and when; [docs/security.md](docs/security.md) says what the encryption
 > protects and what it does not. Use TLS for any server outside your own computer.

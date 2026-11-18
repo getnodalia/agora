@@ -19,7 +19,7 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
   The Linux server ships on its own too (tarball with `install.sh`, `.deb`, `.rpm`), with a systemd
   service, its user and its configuration. Merging a version bump with its notes releases it.
 
-## Done since 0.1.4
+## Done in 0.2.0
 
 - Two-step verification (TOTP with recovery codes) and a security dialog with the account's
   devices; signing out and back in on the same computer keeps the same device and its history.
@@ -39,7 +39,7 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 
 - Call polish: screen sharing, noise suppression, echo cancellation, a better video codec than JPEG
   and a ringing signal for direct messages.
-- A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
+- A Windows installer (MSI) and the app's own icon on `agora.exe`.
 - A container image for the server, and server packages for ARM (Raspberry Pi).
 - Native notifications on macOS and Windows, and unread indicators on the app icon. Linux has an
   opt-in generic notification for live messages; desktop integration still needs platform testing.
