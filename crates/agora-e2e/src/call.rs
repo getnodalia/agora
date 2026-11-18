@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use agora_core::{ChannelId, UserId};
-use rand::RngCore;
 
 /// The MLS exporter label for call keys.
 pub const EXPORTER_LABEL: &str = "agora call v1";
@@ -112,8 +111,7 @@ impl Sealer {
     /// Seal one frame. `None` only if the cipher fails, which it does not for these sizes.
     pub fn seal(&mut self, stream: Stream, media: &[u8]) -> Option<Vec<u8>> {
         self.sequence = self.sequence.saturating_add(1);
-        let mut nonce = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce);
+        let nonce: [u8; 12] = rand::random();
         let mut plain = Vec::with_capacity(8 + media.len());
         plain.extend_from_slice(&self.sequence.to_be_bytes());
         plain.extend_from_slice(media);
@@ -212,11 +210,20 @@ impl Opener {
 mod tests {
     use super::*;
 
-    fn key(epoch: u64, byte: u8) -> CallKey {
-        CallKey {
-            epoch,
-            key: [byte; 32],
+    /// A random key for `(epoch, tag)`, the same one every time it is asked for in a test.
+    fn key(epoch: u64, tag: u8) -> CallKey {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+        thread_local! {
+            static KEYS: RefCell<HashMap<(u64, u8), [u8; 32]>> = RefCell::new(HashMap::new());
         }
+        let key = KEYS.with(|keys| {
+            *keys
+                .borrow_mut()
+                .entry((epoch, tag))
+                .or_insert_with(rand::random)
+        });
+        CallKey { epoch, key }
     }
 
     #[test]
