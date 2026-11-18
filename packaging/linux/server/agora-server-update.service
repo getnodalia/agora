@@ -1,0 +1,12 @@
+[Unit]
+Description=Install the latest Ágora server release
+Documentation=https://github.com/getnodalia/agora/blob/main/docs/deployment.md#upgrading
+After=network-online.target agora-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root: it installs the package (or replaces the binary) and restarts agora-server. It does
+# nothing when /etc/agora/agora.toml sets [updates] automatic = false.
+ExecStart=/usr/bin/agora-server --config /etc/agora/agora.toml self-update --auto
+Nice=10

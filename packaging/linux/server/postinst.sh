@@ -31,5 +31,10 @@ if [ -d /run/systemd/system ]; then
     *)
       systemctl try-restart agora-server.service || true ;;
   esac
+  # The daily self-update timer, enabled once: a timer someone disabled stays disabled.
+  if [ ! -e /var/lib/agora/.update-timer-enabled ]; then
+    systemctl enable --now agora-server-update.timer || true
+    touch /var/lib/agora/.update-timer-enabled
+  fi
 fi
 exit 0

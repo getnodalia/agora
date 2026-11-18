@@ -117,6 +117,7 @@ if has server; then
   install -m755 "$STAGE/usr/bin/agora-server" "$SDIR/agora-server"
   install -m755 "$HERE/server/install.sh" "$SDIR/install.sh"
   install -m644 "$HERE/server/agora.toml" "$HERE/server/agora-server.service" \
+    "$HERE/server/agora-server-update.service" "$HERE/server/agora-server-update.timer" \
     "$HERE/server/README.md" "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$SDIR/"
   tar -C "$WORK/server" -czf "$DIST/$SERVER_BASENAME.tar.gz" "$SERVER_BASENAME"
   cp "$DIST/$SERVER_BASENAME.tar.gz" "$DIST/agora-server-linux-$ARCH.tar.gz"
