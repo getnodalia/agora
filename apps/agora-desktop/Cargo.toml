@@ -29,8 +29,11 @@ directories.workspace = true
 base64.workspace = true
 chrono.workspace = true
 png.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 sys-locale = "0.3"
 rfd = "0.17"
+cpal = "0.16"
+nokhwa = { version = "0.10", features = ["input-native"] }
 qrcode = { version = "0.14", default-features = false }
 tracing.workspace = true
 tracing-subscriber.workspace = true

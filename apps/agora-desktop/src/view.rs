@@ -696,6 +696,14 @@ fn conversation(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &m
                     }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let calls_here = main.model.calls.contains_key(&channel.id)
+                        || main.call.as_ref().is_some_and(|c| c.channel == channel.id);
+                    if !calls_here
+                        && (channel.joined || channel.kind != ChannelKind::Public)
+                        && icon_button(ui, look, "headphones", tr("Start a call"), false).clicked()
+                    {
+                        actions.push(Action::JoinCall(channel.id));
+                    }
                     if !channel.joined && channel.kind == ChannelKind::Public {
                         if cr::primary_button(ui, look, tr("Join channel"), true).clicked() {
                             actions.push(Action::JoinChannel(channel.id));
@@ -734,6 +742,8 @@ fn conversation(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &m
         Stroke::new(1.0, color(p.border_subtle)),
     );
 
+    call_bar(ui, main, look, &channel, actions);
+
     let hint = if channel.kind == ChannelKind::Direct {
         trf("Message {}", &[&peer_name(&channel)])
     } else {
@@ -758,6 +768,188 @@ fn conversation(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &m
             history(ui, main, look, &channel, actions);
         });
     });
+}
+
+/// The call going on in a channel: who is in it, with their pictures when their cameras are on,
+/// and the controls for this device's part.
+fn call_bar(
+    ui: &mut Ui,
+    main: &mut Main,
+    look: &Look,
+    channel: &Channel,
+    actions: &mut Vec<Action>,
+) {
+    let p = &look.palette;
+    let people = main
+        .model
+        .calls
+        .get(&channel.id)
+        .cloned()
+        .unwrap_or_default();
+    let in_call = main.call.as_ref().is_some_and(|c| c.channel == channel.id);
+    if !in_call && people.is_empty() {
+        return;
+    }
+    if let Some(call) = main.call.as_mut().filter(|c| c.channel == channel.id) {
+        call.refresh_textures(ui.ctx());
+        for problem in call.take_problems() {
+            main.notices.push(device_problem(&problem));
+        }
+        // Pictures arrive on other threads: look again soon.
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    ui.add_space(8.0);
+    ui.scope_builder(
+        UiBuilder::new().max_rect(ui.max_rect().shrink2(vec2(16.0, 0.0))),
+        |ui| {
+            cr::island(look).inner_margin(10).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    for person in &people {
+                        call_tile(ui, main, look, channel, person);
+                    }
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if let Some(call) = main.call.as_ref().filter(|c| c.channel == channel.id) {
+                        let muted = call.muted();
+                        if icon_button(
+                            ui,
+                            look,
+                            if muted { "mute" } else { "microphone" },
+                            if muted {
+                                tr("Turn the microphone on")
+                            } else {
+                                tr("Turn the microphone off")
+                            },
+                            muted,
+                        )
+                        .clicked()
+                        {
+                            actions.push(Action::ToggleMute);
+                        }
+                        let camera = call.camera_on;
+                        if icon_button(
+                            ui,
+                            look,
+                            if camera { "camera" } else { "eye-off" },
+                            if camera {
+                                tr("Turn the camera off")
+                            } else {
+                                tr("Turn the camera on")
+                            },
+                            camera,
+                        )
+                        .clicked()
+                        {
+                            actions.push(Action::ToggleCamera);
+                        }
+                        if cr::secondary_button(ui, look, tr("Leave call"), true).clicked() {
+                            actions.push(Action::LeaveCall);
+                        }
+                    } else if cr::primary_button(ui, look, tr("Join call"), true).clicked() {
+                        actions.push(Action::JoinCall(channel.id));
+                    }
+                    ui.label(
+                        RichText::new(if people.len() == 1 {
+                            tr("1 person in the call").to_string()
+                        } else {
+                            trf("{} people in the call", &[&people.len().to_string()])
+                        })
+                        .size(font_size::SMALL)
+                        .color(color(p.text_secondary)),
+                    );
+                    ui.label(
+                        RichText::new(tr("Calls are end-to-end encrypted."))
+                            .size(font_size::CAPTION)
+                            .color(color(p.text_tertiary)),
+                    );
+                });
+            });
+        },
+    );
+}
+
+fn call_tile(
+    ui: &mut Ui,
+    main: &Main,
+    look: &Look,
+    channel: &Channel,
+    person: &agora_protocol::CallParticipant,
+) {
+    let p = &look.palette;
+    let size = vec2(168.0, 126.0);
+    let name = if person.user_id == main.model.me.id {
+        main.model.me.display_name.clone()
+    } else {
+        member_name(&main.model, channel, person.user_id)
+    };
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(12), color(p.surface_sunken));
+    let texture = main
+        .call
+        .as_ref()
+        .filter(|c| c.channel == channel.id)
+        .and_then(|c| c.textures.get(&person.user_id))
+        .filter(|_| person.video);
+    if let Some((_, texture)) = texture {
+        let mut picture = ui.new_child(UiBuilder::new().max_rect(rect));
+        picture.add(
+            egui::Image::new(texture)
+                .fit_to_exact_size(size)
+                .corner_radius(CornerRadius::same(12)),
+        );
+    } else {
+        let mut centre = ui.new_child(UiBuilder::new().max_rect(rect.shrink(8.0)));
+        centre.vertical_centered(|ui| {
+            ui.add_space(22.0);
+            avatar(ui, look, person.user_id.0, &name, 48.0, None);
+        });
+    }
+    let label = ui.painter().layout_no_wrap(
+        name,
+        egui::FontId::proportional(font_size::CAPTION),
+        color(p.text_primary),
+    );
+    let at = rect.left_bottom() + vec2(8.0, -8.0 - label.size().y);
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(at - vec2(4.0, 2.0), label.size() + vec2(8.0, 4.0)),
+        CornerRadius::same(6),
+        color(p.surface_raised),
+    );
+    ui.painter().galley(at, label, color(p.text_primary));
+    if !person.audio {
+        let mut spot = ui.new_child(UiBuilder::new().max_rect(egui::Rect::from_min_size(
+            rect.right_top() + vec2(-26.0, 6.0),
+            vec2(20.0, 20.0),
+        )));
+        icon(&mut spot, "mute", 18.0, color(p.text_secondary));
+    }
+}
+
+/// A member's name in the open workspace.
+fn member_name(model: &crate::model::Model, channel: &Channel, user: agora_core::UserId) -> String {
+    model
+        .members
+        .get(&channel.workspace_id)
+        .and_then(|m| m.iter().find(|m| m.user.id == user))
+        .map_or_else(|| tr("Someone").to_owned(), |m| m.user.display_name.clone())
+}
+
+/// What a device that would not open means for the person, in words.
+fn device_problem(problem: &crate::call::devices::Problem) -> String {
+    use crate::call::devices::Device;
+    let detail = problem.detail.as_deref().unwrap_or_default();
+    match (problem.device, problem.detail.is_some()) {
+        (Device::Microphone, false) => tr("No microphone was found.").to_owned(),
+        (Device::Microphone, true) => trf("The microphone cannot be used: {}", &[detail]),
+        (Device::Speaker, false) => tr("No speaker was found.").to_owned(),
+        (Device::Speaker, true) => trf("The speaker cannot be used: {}", &[detail]),
+        (Device::Camera, false) => tr("No camera was found.").to_owned(),
+        (Device::Camera, true) => trf("The camera cannot be used: {}", &[detail]),
+    }
 }
 
 fn signin_hint(ui: &mut Ui, look: &Look, text: &str) {

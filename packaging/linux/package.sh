@@ -130,7 +130,23 @@ if has appimage; then
   mkdir -p "$APPDIR/usr/bin"
   cp "$STAGE/usr/bin/agora" "$APPDIR/usr/bin/agora"
   cp -R "$STAGE/usr/share" "$APPDIR/usr/share"
-  ln -s usr/bin/agora "$APPDIR/AppRun"
+  # Calls need ALSA, which the binary links at start-up and a bare system may lack. The image
+  # carries one and AppRun uses it only when the system has none of its own, so a host's
+  # sound server plugins keep matching the library they were built for.
+  LDCONFIG="$(command -v ldconfig || echo /sbin/ldconfig)"
+  LIBASOUND="$("$LDCONFIG" -p | awk '/libasound\.so\.2 / && /(x86-64|AArch64)/ { print $NF; exit }')"
+  [[ -n "$LIBASOUND" ]] || { echo "libasound.so.2 not found: install libasound2 to build the AppImage" >&2; exit 1; }
+  mkdir -p "$APPDIR/usr/lib"
+  cp -L "$LIBASOUND" "$APPDIR/usr/lib/libasound.so.2"
+  cat >"$APPDIR/AppRun" <<'APPRUN'
+#!/bin/sh
+here="$(dirname "$(readlink -f "$0")")"
+if ! { command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q 'libasound\.so\.2 '; }; then
+  export LD_LIBRARY_PATH="$here/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+exec "$here/usr/bin/agora" "$@"
+APPRUN
+  chmod +x "$APPDIR/AppRun"
   cp "$HERE/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
   cp "$ROOT/assets/icons/hicolor/256x256/apps/$APP_ID.png" "$APPDIR/$APP_ID.png"
   ln -s "$APP_ID.png" "$APPDIR/.DirIcon"

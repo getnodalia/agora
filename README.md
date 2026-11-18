@@ -95,6 +95,9 @@ stores only ciphertext.
 - **Sent, delivered and read** ticks on your messages, with who has read them.
 - **Integrations**: a Hito project, a build server or any script can post notices to a channel
   through a signed address an admin adds. Notices are readable by the server and say so.
+- **Calls**: talk and show your camera in a channel or a direct message (up to 12 people). Audio
+  and video are sealed on your device with a key from the conversation's MLS group, so the server
+  relays frames it cannot open.
 - **Two-step verification** with an authenticator app and recovery codes, and the devices signed
   in to your account, which stay the same device when you sign out and back in.
 - **Real time** over an authenticated WebSocket: new messages, edits, reactions, typing, presence,
@@ -105,7 +108,7 @@ stores only ciphertext.
   panel), light, dark and high-contrast themes, reduced motion, keyboard shortcuts, Spanish and
   English, NDL window controls on Linux and native ones on macOS and Windows.
 
-Not yet: voice and video, notifications from the operating system, a web client,
+Not yet: screen sharing, notifications from the operating system, a web client,
 mobile apps, PostgreSQL, federation, verified device identities. See [ROADMAP.md](ROADMAP.md).
 
 ## Download

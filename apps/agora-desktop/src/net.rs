@@ -34,6 +34,8 @@ pub enum Reply {
     Security(crate::security::SecurityReply),
     Integrations(crate::integrations::IntegrationsReply),
     Notices(ChannelId, Result<Vec<agora_protocol::IntegrationNotice>>),
+    /// The key for a conversation's call; `true` when it was asked for to join the call.
+    CallKey(ChannelId, bool, Result<agora_e2e::call::CallKey>),
     Receipts(ChannelId, Result<Vec<agora_protocol::Receipt>>),
     OrganizationDetails(u64, OrganizationId, Result<(Vec<Workspace>, Vec<Member>)>),
     OrganizationCreated(u64, Result<Organization>),
