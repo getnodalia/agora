@@ -34,6 +34,7 @@ pub struct App {
     applied: Option<(Theme, bool, bool)>,
     decorated: Option<bool>,
     was_focused: bool,
+    updates: crate::updates::Runtime,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -85,6 +86,8 @@ pub enum Panel {
 /// Something a screen asked for.
 #[derive(Clone, Debug)]
 pub enum Action {
+    /// "Check for updates…" in the main menu.
+    CheckForUpdates,
     OpenGitHubEvents,
     RefreshGitHubEvents,
     OpenOrganizations,
@@ -160,7 +163,9 @@ impl App {
             applied: None,
             decorated: None,
             was_focused: true,
+            updates: crate::updates::Runtime::default(),
         };
+        app.updates.start(false);
         app.apply_appearance(&cc.egui_ctx);
         if let Some(saved) = settings::load_session(app.dir.as_deref()) {
             app.restore(saved);
@@ -513,6 +518,7 @@ impl App {
                     }
                     self.save_settings(now);
                 }
+                Action::CheckForUpdates => self.updates.start(true),
                 Action::Logout => self.log_out(false),
                 Action::LogoutForget => self.log_out(true),
                 Action::TogglePanel => {
@@ -1392,6 +1398,7 @@ impl Main {
             }
             Action::TogglePanel
             | Action::Logout
+            | Action::CheckForUpdates
             | Action::LogoutForget
             | Action::SettingsChanged
             | Action::Copy(_)
@@ -1436,6 +1443,7 @@ impl eframe::App for App {
         }
         self.handle_replies(now);
         self.apply_appearance(&ctx);
+        self.updates.tick(&ctx);
 
         let decorated = !self.ndl_controls();
         if self.decorated != Some(decorated) {
@@ -1459,6 +1467,7 @@ impl eframe::App for App {
             Screen::Main(_) => view::show(ui, self, now),
         };
         self.act(&ctx, actions, now);
+        self.updates.show(&ctx);
 
         // Typing indicators and toasts expire on their own: wake up to remove them.
         ctx.request_repaint_after(std::time::Duration::from_secs(1));

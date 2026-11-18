@@ -24,6 +24,7 @@ mod net;
 mod security;
 mod settings;
 mod signin;
+mod updates;
 mod view;
 mod widgets;
 
