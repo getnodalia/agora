@@ -269,8 +269,20 @@ async fn devices_read_from_when_they_were_added() {
     assert_eq!(luis.read(old).await.body, "antes del portátil");
     assert_eq!(luis.read(new).await.body, "después del portátil");
 
-    // Logging the laptop out takes it out of the conversation at the next message.
+    // Logging out keeps the laptop's place; removing the device takes it out of the
+    // conversation at the next message.
     laptop.logout().await.unwrap();
+    ana.say(general.id, "sigue siendo tu portátil").await;
+    let members = ana.e2e.members(general.id).await;
+    assert_eq!(members.iter().filter(|m| m.user == luis.user.id).count(), 2);
+    let laptop_key = laptop.e2e.public_key_base64();
+    luis.remove_device(&laptop_key).await.unwrap();
+    assert!(luis
+        .own_devices()
+        .await
+        .unwrap()
+        .iter()
+        .all(|d| d.public_key != laptop_key));
     ana.say(general.id, "solo dispositivos activos").await;
     let members = ana.e2e.members(general.id).await;
     assert_eq!(members.iter().filter(|m| m.user == luis.user.id).count(), 1);
@@ -338,5 +350,41 @@ async fn strangers_cannot_touch_a_conversations_encryption() {
         .await
         .unwrap_err();
     assert_eq!(stolen.code(), Some(ErrorCode::Conflict));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn logging_out_and_back_in_on_the_same_computer_is_the_same_device() {
+    let server = Server::start("sqlite::memory:").await;
+    let (ana, luis, _ws, general) = team(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("device.json");
+    let password = "luis-test-password";
+
+    let (client, session) = server.anonymous().login("luis", password).await.unwrap();
+    let mac = agora_client::Secure::open(&client, session.user.id, Some(path.clone()))
+        .await
+        .unwrap();
+    let before = ana.say(general.id, "antes de cerrar sesión").await;
+    mac.sync(general.id).await.unwrap();
+    client.logout().await.unwrap();
+    let away = ana.say(general.id, "mientras estabas fuera").await;
+
+    let (client, session) = server.anonymous().login("luis", password).await.unwrap();
+    let again = agora_client::Secure::open(&client, session.user.id, Some(path))
+        .await
+        .unwrap();
+    assert_eq!(again.fingerprint(), mac.fingerprint());
+    again.sync(general.id).await.unwrap();
+    for (message, text) in [(before, "antes de cerrar sesión"), (away, "mientras estabas fuera")] {
+        let mut message = message;
+        again.fill_one(&mut message).await;
+        assert_eq!(message.body, text);
+    }
+    // Still one laptop and the first device, not a growing list.
+    let devices = client.own_devices().await.unwrap();
+    assert_eq!(devices.len(), 2);
+    assert_eq!(devices.iter().filter(|d| d.this_device).count(), 1);
+    let _ = luis;
     server.stop().await;
 }

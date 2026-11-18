@@ -184,6 +184,7 @@ const SPANISH: &[(&str, &str)] = &[
     ("Load older messages", "Cargar mensajes anteriores"),
     ("Loading…", "Cargando…"),
     ("Log out", "Cerrar sesión"),
+    ("Log out and forget this computer", "Cerrar sesión y olvidar este equipo"),
     ("Main menu", "Menú principal"),
     ("Maximize", "Maximizar"),
     ("Member", "Miembro"),

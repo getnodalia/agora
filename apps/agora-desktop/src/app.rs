@@ -132,6 +132,9 @@ pub enum Action {
         thread: Option<MessageId>,
     },
     Logout,
+    /// Log out and remove this computer's device: keys, decrypted text and its place in
+    /// conversations. For a shared or lost computer.
+    LogoutForget,
     SettingsChanged,
     /// Put text on the clipboard and say so.
     Copy(String),
@@ -356,6 +359,35 @@ impl App {
         }));
     }
 
+    /// End the session. The device stays on this computer unless `forget`: signing in again is
+    /// then the same device, still in every conversation, with what it already read.
+    fn log_out(&mut self, forget: bool) {
+        if let Screen::Main(main) = &mut self.screen {
+            if let Some(rt) = main.realtime.take() {
+                rt.close();
+            }
+            let client = main.client.clone();
+            let key = main.secure.public_key_base64();
+            if forget {
+                if let Some(path) = settings::device_path(
+                    self.dir.as_deref(),
+                    client.base().as_str(),
+                    main.model.me.id,
+                ) {
+                    Secure::wipe(&path);
+                }
+            }
+            self.net.run(async move {
+                // Removing the device also ends its session.
+                if !forget || client.remove_device(&key).await.is_err() {
+                    let _ = client.logout().await;
+                }
+                Reply::LoggedOut
+            });
+        }
+        self.sign_out(None);
+    }
+
     fn sign_out(&mut self, notice: Option<&str>) {
         settings::forget_session(self.dir.as_deref());
         let mut form = signin::Form::new(&self.settings);
@@ -457,27 +489,8 @@ impl App {
                     }
                     self.save_settings(now);
                 }
-                Action::Logout => {
-                    if let Screen::Main(main) = &mut self.screen {
-                        if let Some(rt) = main.realtime.take() {
-                            rt.close();
-                        }
-                        let client = main.client.clone();
-                        // Logging out ends this device: its keys and what it decrypted go too.
-                        if let Some(path) = settings::device_path(
-                            self.dir.as_deref(),
-                            client.base().as_str(),
-                            main.model.me.id,
-                        ) {
-                            Secure::wipe(&path);
-                        }
-                        self.net.run(async move {
-                            let _ = client.logout().await;
-                            Reply::LoggedOut
-                        });
-                    }
-                    self.sign_out(None);
-                }
+                Action::Logout => self.log_out(false),
+                Action::LogoutForget => self.log_out(true),
                 Action::TogglePanel => {
                     self.settings.context_panel = !self.settings.context_panel;
                     self.save_settings(now);
@@ -1323,6 +1336,7 @@ impl Main {
             }
             Action::TogglePanel
             | Action::Logout
+            | Action::LogoutForget
             | Action::SettingsChanged
             | Action::Copy(_)
             | Action::CheckServer

@@ -518,6 +518,22 @@ impl Client {
     }
 
     /// Publish key packages for this session's device (base64).
+    /// Your devices: signed in, or signed out recently and still in your conversations.
+    pub async fn own_devices(&self) -> Result<Vec<OwnDevice>> {
+        self.get("/devices").await
+    }
+
+    /// Remove a device (base64 key). Removing this one signs this session out.
+    pub async fn remove_device(&self, public_key: &str) -> Result<()> {
+        self.post(
+            "/devices/remove",
+            &RemoveDeviceRequest {
+                public_key: public_key.to_owned(),
+            },
+        )
+        .await
+    }
+
     pub async fn publish_key_packages(&self, key_packages: Vec<String>) -> Result<DeviceStatus> {
         self.post(
             "/devices/me/key_packages",

@@ -43,6 +43,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/mfa/disable", post(mfa::disable))
         .route("/auth/mfa/recovery-codes", post(mfa::recovery_codes))
         .route("/me", get(accounts::me).patch(accounts::update_me))
+        .route("/devices", get(e2e::own_devices))
+        .route("/devices/remove", post(e2e::remove_device))
         .route("/devices/me", put(e2e::register_device))
         .route("/devices/me/key_packages", post(e2e::publish_key_packages))
         .route(

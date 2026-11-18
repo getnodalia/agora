@@ -104,6 +104,45 @@ pub async fn register_device(
     device_status(&state, &key).await
 }
 
+/// `GET /devices`: the caller's devices.
+pub async fn own_devices(
+    State(state): State<AppState>,
+    auth: Auth,
+) -> AppResult<Json<Vec<agora_protocol::OwnDevice>>> {
+    let rows = state.store.own_devices(auth.user.id, now_ms()).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|d| agora_protocol::OwnDevice {
+                public_key: STANDARD.encode(&d.public_key),
+                created_at: d.created_at,
+                last_seen_at: d.last_seen_at,
+                this_device: d.session_id == Some(auth.session_id),
+                signed_in: d.session_id.is_some(),
+            })
+            .collect(),
+    ))
+}
+
+/// `POST /devices/remove`: remove one of the caller's devices and sign it out. The others take
+/// it out of each conversation the next time they write there.
+pub async fn remove_device(
+    State(state): State<AppState>,
+    auth: Auth,
+    Json(req): Json<agora_protocol::RemoveDeviceRequest>,
+) -> AppResult<StatusCode> {
+    let key = decode("public_key", &req.public_key)?;
+    match state.store.remove_device(auth.user.id, &key).await? {
+        None => Err(AppError::not_found()),
+        Some(session) => {
+            if let Some(id) = session {
+                state.hub.close_session(id);
+            }
+            tracing::info!(user = %auth.user.id, "device removed");
+            Ok(StatusCode::NO_CONTENT)
+        }
+    }
+}
+
 /// The caller's registered device, or an error telling the client to register it first.
 async fn own_device(state: &AppState, auth: &Auth) -> AppResult<Vec<u8>> {
     state

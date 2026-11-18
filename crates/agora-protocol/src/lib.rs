@@ -470,6 +470,26 @@ pub struct DeviceStatus {
     pub key_packages: u32,
 }
 
+/// One of your devices: a computer that can read your conversations.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnDevice {
+    /// The MLS signing key, base64. Compare its fingerprint with what others see.
+    pub public_key: String,
+    pub created_at: Timestamp,
+    pub last_seen_at: Timestamp,
+    /// The device making this request.
+    pub this_device: bool,
+    /// Signed in now. A signed-out device keeps its place in conversations for a while, so
+    /// signing in again on the same computer shows everything.
+    pub signed_in: bool,
+}
+
+/// Remove one of your devices: it is signed out and leaves every conversation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RemoveDeviceRequest {
+    pub public_key: String,
+}
+
 /// One-use key packages for this session's device, base64.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PublishKeyPackagesRequest {
