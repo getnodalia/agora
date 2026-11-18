@@ -380,6 +380,13 @@ pub struct MarkReadRequest {
     pub message_id: MessageId,
 }
 
+/// A file stored for a conversation: ciphertext only, its key travels in the encrypted message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UploadedFile {
+    pub id: i64,
+    pub size: u64,
+}
+
 /// How far one member of a conversation has received and read it: every message up to
 /// `delivered_id` reached one of their devices, and they have seen every one up to `read_id`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

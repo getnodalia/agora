@@ -102,7 +102,13 @@ pub struct Limits {
     pub connections_per_user: usize,
     /// Largest HTTP request body, in bytes.
     pub max_body_bytes: usize,
+    /// Largest file people can share in a conversation, in bytes (encrypted size). At most
+    /// [`FILE_HARD_MAX_BYTES`].
+    pub max_file_bytes: usize,
 }
+
+/// The largest file upload the server accepts whatever the configuration says.
+pub const FILE_HARD_MAX_BYTES: usize = agora_core::limits::FILE_MAX_BYTES as usize + 64;
 
 impl Default for Limits {
     fn default() -> Self {
@@ -112,6 +118,7 @@ impl Default for Limits {
             reads_per_minute: 1_200,
             connections_per_user: 16,
             max_body_bytes: 1024 * 1024,
+            max_file_bytes: 100 * 1024 * 1024,
         }
     }
 }

@@ -51,6 +51,50 @@ pub fn icon_button(ui: &mut Ui, look: &Look, name: &str, label: &str, active: bo
     response.on_hover_text(label)
 }
 
+/// A file in a message: its kind, name and size, and a button to save it. True when the person
+/// asked to save it.
+pub fn file_card(ui: &mut Ui, look: &Look, attachment: &agora_core::content::Attachment) -> bool {
+    let p = &look.palette;
+    let mut save = false;
+    Frame::NONE
+        .fill(color(p.surface_sunken))
+        .stroke(Stroke::new(1.0, color(p.border_subtle)))
+        .corner_radius(10)
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_max_width(360.0);
+            ui.horizontal(|ui| {
+                let kind = if attachment.mime.starts_with("image/") {
+                    "image"
+                } else {
+                    "file"
+                };
+                icon(ui, kind, 28.0, color(p.accent_text));
+                ui.add_space(4.0);
+                ui.vertical(|ui| {
+                    ui.set_max_width(250.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&attachment.name)
+                                .strong()
+                                .color(color(p.text_primary)),
+                        )
+                        .truncate(),
+                    );
+                    ui.label(
+                        RichText::new(agora_core::content::human_size(attachment.size))
+                            .size(font_size::CAPTION)
+                            .color(color(p.text_secondary)),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    save = icon_button(ui, look, "save", crate::i18n::tr("Save"), false).clicked();
+                });
+            });
+        });
+    save
+}
+
 /// Colours for avatars, from the palette's status and accent colours so they follow the theme.
 fn avatar_fill(look: &Look, seed: i64) -> Color32 {
     let p = &look.palette;

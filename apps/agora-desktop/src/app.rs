@@ -15,7 +15,7 @@ use nodalia_theme::creator::Look;
 use nodalia_theme::for_egui::{self, Appearance};
 use nodalia_theme::{Accent, Mode};
 
-use crate::i18n::{self, tr};
+use crate::i18n::{self, tr, trf};
 use crate::model::{Connection, Effect, Model, Pending};
 use crate::net::{self, Net, Reply};
 use crate::settings::{self, SavedSession, Settings, Theme, WindowControls};
@@ -107,6 +107,21 @@ pub enum Action {
         channel: ChannelId,
         thread: Option<MessageId>,
     },
+    /// Ask which files to send to a conversation, then send them.
+    AttachFiles {
+        channel: ChannelId,
+        thread: Option<MessageId>,
+    },
+    /// Send files from this computer, one message each.
+    SendFiles {
+        channel: ChannelId,
+        thread: Option<MessageId>,
+        paths: Vec<std::path::PathBuf>,
+    },
+    /// Send a copy of a conversation's newest messages, for people who joined after them.
+    ShareHistory(ChannelId, usize),
+    /// Ask where to save a file a message carries, then download and decrypt it there.
+    SaveFile(agora_core::content::Attachment),
     Retry(String),
     Discard(String),
     OpenThread(MessageId),
@@ -752,6 +767,16 @@ impl Main {
                     return Err(e);
                 }
             },
+            Reply::FilesPicked {
+                channel,
+                thread,
+                paths,
+            } => self.send_files(net, channel, thread, paths),
+            Reply::FileSaved(name, result) => {
+                if result? {
+                    self.notices.push(trf("Saved {}.", &[&name]));
+                }
+            }
             Reply::Thread(result) => self.model.set_thread(result?),
             Reply::Reacted(id, result) => self.model.set_reactions(id, result?),
             Reply::Edited(result) => self.model.replace_message(result?),
@@ -966,12 +991,88 @@ impl Main {
         }
     }
 
+    /// Send each file as its own message, shown as pending until the server has it.
+    fn send_files(
+        &mut self,
+        net: &Net,
+        channel: ChannelId,
+        thread: Option<MessageId>,
+        paths: Vec<std::path::PathBuf>,
+    ) {
+        for path in paths
+            .into_iter()
+            .filter(|p| p.is_file())
+            .take(FILES_AT_ONCE)
+        {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let pending = Pending {
+                channel,
+                thread_root: thread,
+                nonce: agora_client::new_nonce(),
+                body: format!("📎 {}", agora_core::content::safe_file_name(&name)),
+                failed: false,
+                file: Some(path),
+            };
+            self.post(net, pending);
+        }
+    }
+
+    /// Post the newest readable messages of a conversation again as one encrypted message, so
+    /// everyone in it now can read them. Earlier shares are not shared again.
+    fn share_history(&mut self, net: &Net, channel: ChannelId, count: usize) {
+        use agora_core::content::{history_message, parse, Content, SharedMessage};
+        let Some(conversation) = self.model.conversations.get(&channel) else {
+            return;
+        };
+        let readable: Vec<SharedMessage> = conversation
+            .messages
+            .iter()
+            .filter(|m| !m.deleted && !m.body.is_empty())
+            .filter(|m| !matches!(parse(&m.body), Content::History(_)))
+            .map(|m| SharedMessage {
+                author: m.author.display_name.clone(),
+                at: m.created_at,
+                body: m.body.clone(),
+            })
+            .collect();
+        let newest = readable
+            .get(readable.len().saturating_sub(count)..)
+            .unwrap_or_default();
+        if newest.is_empty() {
+            self.notices
+                .push(tr("There are no messages to share yet.").to_string());
+            return;
+        }
+        let pending = Pending {
+            channel,
+            thread_root: None,
+            nonce: agora_client::new_nonce(),
+            body: history_message(newest),
+            failed: false,
+            file: None,
+        };
+        self.post(net, pending);
+    }
+
     fn post(&mut self, net: &Net, pending: Pending) {
         let channel = pending.channel;
         let nonce = pending.nonce.clone();
         let body = pending.body.clone();
         let thread = pending.thread_root;
-        let mentions = self.mentioned(&body);
+        let file = pending.file.clone();
+        // Only typed text mentions anyone: a shared history quotes old mentions.
+        let typed = matches!(
+            agora_core::content::parse(&body),
+            agora_core::content::Content::Text(_)
+        );
+        let mentions = if file.is_some() || !typed {
+            Vec::new()
+        } else {
+            self.mentioned(&body)
+        };
         if let Some(p) = self.model.pending.iter_mut().find(|p| p.nonce == nonce) {
             p.failed = false;
         } else {
@@ -979,7 +1080,10 @@ impl Main {
         }
         let secure = self.secure.clone();
         net.run(async move {
-            let result = secure.post(channel, &body, &nonce, thread, mentions).await;
+            let result = match file {
+                Some(path) => send_file(&secure, channel, &path, &nonce, thread).await,
+                None => secure.post(channel, &body, &nonce, thread, mentions).await,
+            };
             Reply::Posted {
                 channel,
                 nonce,
@@ -1244,10 +1348,47 @@ impl Main {
                     nonce: agora_client::new_nonce(),
                     body,
                     failed: false,
+                    file: None,
                 };
                 self.post(net, pending);
                 self.focus_composer = true;
             }
+            Action::AttachFiles { channel, thread } => {
+                net.run(async move {
+                    let picked = rfd::AsyncFileDialog::new()
+                        .set_title(tr("Send files"))
+                        .pick_files()
+                        .await
+                        .unwrap_or_default();
+                    Reply::FilesPicked {
+                        channel,
+                        thread,
+                        paths: picked.iter().map(|f| f.path().to_path_buf()).collect(),
+                    }
+                });
+            }
+            Action::SendFiles {
+                channel,
+                thread,
+                paths,
+            } => self.send_files(net, channel, thread, paths),
+            Action::SaveFile(attachment) => {
+                let secure = self.secure.clone();
+                net.run(async move {
+                    let name = attachment.name.clone();
+                    let target = rfd::AsyncFileDialog::new()
+                        .set_title(tr("Save file"))
+                        .set_file_name(&name)
+                        .save_file()
+                        .await;
+                    let result = match target {
+                        None => Ok(false),
+                        Some(target) => save_file(&secure, &attachment, target.path()).await,
+                    };
+                    Reply::FileSaved(name, result)
+                });
+            }
+            Action::ShareHistory(channel, count) => self.share_history(net, channel, count),
             Action::Retry(nonce) => {
                 if let Some(p) = self
                     .model
@@ -1480,3 +1621,66 @@ impl eframe::App for App {
 
 /// The server's name and registration policy, for the sign-in screen.
 pub type ServerCheck = Result<ServerInfo, String>;
+
+/// The most files one pick or drop sends, so a dropped folder's worth cannot flood a conversation.
+const FILES_AT_ONCE: usize = 20;
+
+/// Read a file from this computer, encrypt it and send it.
+async fn send_file(
+    secure: &Secure,
+    channel: ChannelId,
+    path: &std::path::Path,
+    nonce: &str,
+    thread: Option<MessageId>,
+) -> agora_client::Result<Message> {
+    let local = |e: std::io::Error| ClientError::Local(e.to_string());
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let size = tokio::fs::metadata(path).await.map_err(local)?.len();
+    if size > agora_core::limits::FILE_MAX_BYTES {
+        return Err(ClientError::Local(trf(
+            "{} is too large to send.",
+            &[&agora_core::content::safe_file_name(&name)],
+        )));
+    }
+    let data = tokio::fs::read(path).await.map_err(local)?;
+    secure
+        .send_file(channel, &name, mime_type(&name), &data, "", nonce, thread)
+        .await
+}
+
+/// Download, decrypt and write a file a message carries. Written beside the target first, so a
+/// failure never leaves half a file under the name the person chose.
+async fn save_file(
+    secure: &Secure,
+    attachment: &agora_core::content::Attachment,
+    target: &std::path::Path,
+) -> agora_client::Result<bool> {
+    let local = |e: std::io::Error| ClientError::Local(e.to_string());
+    let data = secure.open_file(attachment).await?;
+    let mut partial = target.as_os_str().to_owned();
+    partial.push(".part");
+    let partial = std::path::PathBuf::from(partial);
+    tokio::fs::write(&partial, &data).await.map_err(local)?;
+    tokio::fs::rename(&partial, target).await.map_err(local)?;
+    Ok(true)
+}
+
+/// A media type from a file's extension, for the few kinds a client might show differently.
+fn mime_type(name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("pdf") => "application/pdf",
+        Some("txt" | "md") => "text/plain",
+        Some("zip") => "application/zip",
+        Some("mp4") => "video/mp4",
+        Some("mp3") => "audio/mpeg",
+        _ => "",
+    }
+}

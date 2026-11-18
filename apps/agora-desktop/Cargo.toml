@@ -22,7 +22,7 @@ eframe.workspace = true
 egui.workspace = true
 nodalia-theme.workspace = true
 nodalia-update = { git = "https://github.com/getnodalia/nodalia-design", rev = "114848a2ff1a7c29c9a5432fb12e955fbe0aeef2", features = ["egui"] }
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 serde.workspace = true
 serde_json.workspace = true
 directories.workspace = true
@@ -30,6 +30,7 @@ base64.workspace = true
 chrono.workspace = true
 png.workspace = true
 sys-locale = "0.3"
+rfd = "0.17"
 qrcode = { version = "0.14", default-features = false }
 tracing.workspace = true
 tracing-subscriber.workspace = true

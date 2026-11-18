@@ -34,6 +34,15 @@ the text, and neither can whoever gets a copy of its database or backups.
   in" the device lives in memory only. Log out deletes the file.
 - **Checks on what arrives.** A decrypted message must come from a device of the account the server
   says wrote it, and an edit must name the message it edits; otherwise it is shown as unreadable.
+- **Files** are encrypted on the sending device with a new AES-256-GCM key each, and that key
+  travels only inside the end-to-end encrypted message. The server stores and serves bytes it
+  cannot open; it sees each file's encrypted size, when it was sent and in which conversation.
+  A saved file is written next to its target first and then renamed into place.
+- **Earlier messages for newcomers.** Someone who joins a conversation cannot read what came
+  before. A member can choose to share the newest 25, 50 or 100 messages they can read: their
+  device sends them again as one new encrypted message, which everyone in the conversation now
+  can read (files included, since their keys travel with them). Nothing is shared without that
+  choice.
 - **Search** runs on the device, over its decrypted copy. The server's search finds nothing in
   encrypted messages.
 
@@ -62,6 +71,8 @@ End-to-end encryption hides the text, not the rest:
   makes this visible rather than impossible: the conversation's details list every device that
   can read it with its fingerprint, and a new device of someone else's in the open conversation
   is announced. Compare fingerprints in person to be sure. Verified identities are planned.
+- **What a sharer shows.** A shared history is what the sharer's device says was written. It is
+  shown as theirs, quoting others, and a member who already had those messages can compare.
 - **A compromised device.** Whoever controls a device reads what it reads, including its device
   file.
 - **No independent audit** of Ágora's use of MLS yet.

@@ -3,6 +3,7 @@
 //! Nothing here does I/O: identifiers, input validation, the role and permission model, and the
 //! plain-text message format (a small Markdown subset) that clients render without HTML.
 
+pub mod content;
 pub mod format;
 pub mod ids;
 pub mod limits;
