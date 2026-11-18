@@ -3,9 +3,9 @@ use std::sync::Arc;
 use agora_storage::Store;
 
 use crate::config::Config;
-use crate::mfa_service::Mfa;
 use crate::hub::Hub;
 use crate::limiter::Limiter;
+use crate::mfa_service::Mfa;
 
 /// Shared by every request. Cheap to clone.
 #[derive(Clone)]

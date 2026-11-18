@@ -69,7 +69,9 @@ impl Mfa {
 }
 
 fn default_key_path(database: &str) -> Option<PathBuf> {
-    let rest = database.strip_prefix("sqlite://").or_else(|| database.strip_prefix("sqlite:"))?;
+    let rest = database
+        .strip_prefix("sqlite://")
+        .or_else(|| database.strip_prefix("sqlite:"))?;
     let file = rest.split('?').next()?;
     if file.is_empty() || file.starts_with(':') {
         return None;

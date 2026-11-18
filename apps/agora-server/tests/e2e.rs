@@ -376,7 +376,10 @@ async fn logging_out_and_back_in_on_the_same_computer_is_the_same_device() {
         .unwrap();
     assert_eq!(again.fingerprint(), mac.fingerprint());
     again.sync(general.id).await.unwrap();
-    for (message, text) in [(before, "antes de cerrar sesión"), (away, "mientras estabas fuera")] {
+    for (message, text) in [
+        (before, "antes de cerrar sesión"),
+        (away, "mientras estabas fuera"),
+    ] {
         let mut message = message;
         again.fill_one(&mut message).await;
         assert_eq!(message.body, text);

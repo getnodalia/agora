@@ -98,12 +98,14 @@ impl Store {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(public_key, created_at, last_seen_at, session_id)| OwnDevice {
-                public_key,
-                created_at,
-                last_seen_at,
-                session_id,
-            })
+            .map(
+                |(public_key, created_at, last_seen_at, session_id)| OwnDevice {
+                    public_key,
+                    created_at,
+                    last_seen_at,
+                    session_id,
+                },
+            )
             .collect())
     }
 
@@ -470,7 +472,10 @@ mod device_upgrade_tests {
         // Long after it was last seen, it no longer counts.
         let later = 5 + DETACHED_DEVICE_DAYS * 86_400_000 + 1;
         assert!(store.devices(&[UserId(1)], later).await.unwrap().is_empty());
-        assert_eq!(store.remove_device(UserId(1), &[0xAA]).await.unwrap(), Some(None));
+        assert_eq!(
+            store.remove_device(UserId(1), &[0xAA]).await.unwrap(),
+            Some(None)
+        );
         assert_eq!(store.key_package_count(&[0xAA]).await.unwrap(), 0);
         store.close().await;
     }

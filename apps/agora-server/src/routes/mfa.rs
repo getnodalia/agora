@@ -95,9 +95,10 @@ pub async fn setup(
     Ok(Json(setup))
 }
 
-fn new_recovery_codes(
-    user: agora_core::UserId,
-) -> AppResult<(Vec<Zeroizing<String>>, Vec<[u8; 32]>)> {
+/// Recovery codes to show once, and their hashes to store.
+type RecoveryCodes = (Vec<Zeroizing<String>>, Vec<[u8; 32]>);
+
+fn new_recovery_codes(user: agora_core::UserId) -> AppResult<RecoveryCodes> {
     let mut codes = Vec::with_capacity(10);
     let mut hashes = Vec::with_capacity(10);
     for _ in 0..10 {
@@ -175,9 +176,15 @@ pub async fn disable(
     check_rate(&state, &auth)?;
     check_password(&state, &auth, req.password).await?;
     let code = mfa_crypto::normalize_code(&req.code);
-    if !mfa_service::verify_current_code(&state.store, &state.mfa.key, auth.user.id, &code, now_ms())
-        .await
-        .map_err(crypto_failed)?
+    if !mfa_service::verify_current_code(
+        &state.store,
+        &state.mfa.key,
+        auth.user.id,
+        &code,
+        now_ms(),
+    )
+    .await
+    .map_err(crypto_failed)?
     {
         return Err(wrong_code());
     }
@@ -193,9 +200,15 @@ pub async fn recovery_codes(
 ) -> AppResult<Json<MfaRecoveryCodes>> {
     check_rate(&state, &auth)?;
     let code = mfa_crypto::normalize_code(&req.code);
-    if !mfa_service::verify_current_code(&state.store, &state.mfa.key, auth.user.id, &code, now_ms())
-        .await
-        .map_err(crypto_failed)?
+    if !mfa_service::verify_current_code(
+        &state.store,
+        &state.mfa.key,
+        auth.user.id,
+        &code,
+        now_ms(),
+    )
+    .await
+    .map_err(crypto_failed)?
     {
         return Err(wrong_code());
     }

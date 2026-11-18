@@ -143,11 +143,34 @@ The server logs events with ids (`account created user=2`), never passwords, tok
 codes, keys or message text (which it does not have). At `debug` level the HTTP trace prints request paths, which include search
 terms; keep production at `info` (the default).
 
+## Two-step verification
+
+An account can turn on a second factor: a six-digit TOTP code from any authenticator app
+(RFC 6238, SHA-1, 30 seconds, one step of clock skew). Turning it on needs the password and a
+code from the new secret, signs out every other session, and shows ten single-use recovery codes
+once. Sign-in then needs the password and a code or a recovery code; each code is accepted once,
+checked and spent in the same transaction that creates the session. Attempts are rate-limited
+per address and per account. Turning it off needs the password and a current code.
+
+The server keeps each TOTP secret sealed with AES-256-GCM, bound to its account, under a key in
+a separate file (`agora.db.mfa-key` beside the database, owner-only, created on first start;
+`mfa_key_file` or `AGORA_MFA_KEY_FILE` move it). A copy of the database alone does not reveal
+the secrets. Recovery codes are stored as SHA-256 hashes only. Losing the key file disables
+every authenticator: people then sign in with a recovery code, turn the factor off and on again.
+
+## Devices and signing out
+
+A device is the encryption key one computer holds for one account. It outlives its session:
+logging out and back in on the same computer is the same device, still in its conversations,
+with what it already decrypted. A signed-out device keeps counting for 90 days after it was
+last seen, then the others take it out of each conversation. People see their devices and can
+remove any of them (which also signs it out); "Log out and forget this computer" removes the
+device and deletes its keys and decrypted text from the computer.
+
 ## Known limits
 
-- No two-factor sign-in, password reset by email or account deletion yet. MFA cryptography and
-  storage primitives are not connected to enrollment, login, session restrictions, key management
-  or recovery UI; they do not enforce MFA in this version.
+- No password reset by email or account deletion yet. Two-step verification (TOTP) is optional
+  per account; a server-wide requirement for it does not exist yet.
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end
   encryption".

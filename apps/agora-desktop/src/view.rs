@@ -184,10 +184,7 @@ fn top_bar(
                 if ui.button(tr("Log out")).clicked() {
                     actions.push(Action::Logout);
                 }
-                if ui
-                    .button(tr("Log out and forget this computer"))
-                    .clicked()
-                {
+                if ui.button(tr("Log out and forget this computer")).clicked() {
                     actions.push(Action::LogoutForget);
                 }
             });

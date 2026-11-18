@@ -60,7 +60,10 @@ async fn sign_in_needs_a_second_factor_once_it_is_enabled() {
         .mfa
         .pending(user.id, agora_server::auth::now_ms())
         .unwrap();
-    assert_eq!(code_of(ana.mfa_enable("000000").await.unwrap_err()), ErrorCode::Invalid);
+    assert_eq!(
+        code_of(ana.mfa_enable("000000").await.unwrap_err()),
+        ErrorCode::Invalid
+    );
     // A code from the previous step, so the next one is still free to sign in with.
     let codes = ana
         .mfa_enable(&code_at(secret.as_ref(), now_secs() - 30))
@@ -81,7 +84,11 @@ async fn sign_in_needs_a_second_factor_once_it_is_enabled() {
         ErrorCode::MfaRequired
     );
     assert_eq!(
-        code_of(anon.login_with(&login(Some("123456".into()), None)).await.unwrap_err()),
+        code_of(
+            anon.login_with(&login(Some("123456".into()), None))
+                .await
+                .unwrap_err()
+        ),
         ErrorCode::MfaRequired
     );
     let current = code_at(secret.as_ref(), now_secs());
@@ -102,7 +109,13 @@ async fn sign_in_needs_a_second_factor_once_it_is_enabled() {
     // Turning it off needs the password and a fresh code; then a password is enough again.
     assert!(ana.mfa_disable(PASSWORD, "000000").await.is_err());
     // The next step's code is accepted within the allowed clock skew.
-    let (_, step) = server.state.store.totp_factor(user.id).await.unwrap().unwrap();
+    let (_, step) = server
+        .state
+        .store
+        .totp_factor(user.id)
+        .await
+        .unwrap()
+        .unwrap();
     let next = code_at(secret.as_ref(), (step as u64 + 1) * 30);
     ana.mfa_disable(PASSWORD, &next).await.unwrap();
     assert!(!ana.mfa_status().await.unwrap().enabled);
