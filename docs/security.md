@@ -43,6 +43,11 @@ the text, and neither can whoever gets a copy of its database or backups.
   device sends them again as one new encrypted message, which everyone in the conversation now
   can read (files included, since their keys travel with them). Nothing is shared without that
   choice.
+- **Calls.** Audio and video are sealed on the device with AES-256-GCM, under a key each
+  device derives from the conversation's MLS group (an exported secret of its current epoch), so
+  the server relays frames it cannot open and a device removed from the conversation cannot
+  follow the next epoch's calls. Each frame is bound to its conversation, sender and kind, and
+  carries a sequence number so a replayed frame is dropped.
 - **Search** runs on the device, over its decrypted copy. The server's search finds nothing in
   encrypted messages.
 
@@ -63,6 +68,8 @@ End-to-end encryption hides the text, not the rest:
 - GitHub event metadata in the optional server-side inbox is server-readable and visible to all
   members of the configured workspace. It is separate from encrypted messages. See
   [github-webhook.md](github-webhook.md) for its limits and replay markers.
+- calls: who joins which call and when, whether their microphone and camera are on, and the
+  size and timing of every audio and video frame;
 - notices from integrations (another app posting to a channel) are server-readable and stored
   with the channel; the server keeps each integration's key to check signatures. See
   [integrations.md](integrations.md).
@@ -136,7 +143,8 @@ End-to-end encryption hides the text, not the rest:
 ## Abuse limits
 
 Per minute: sign-in and registration attempts per address (10), writes per account (120), reads
-per account (1200), typing notices (30); at most 16 WebSockets per account. All are in
+per account (1200), typing notices (30); at most 16 WebSockets per account; 12 people per call
+and 1 MiB per second of call media per connection. All are in
 `agora.toml` (`[limits]`). Behind a proxy, set `trust_proxy = true` so the address comes from
 the last address in `X-Forwarded-For`; without a proxy that header is ignored. Limits are held in
 process memory and reset on restart; they are not shared between server processes. `trust_proxy`

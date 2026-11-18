@@ -215,12 +215,14 @@ dependencies = [
 name = "agora-e2e"
 version = "0.1.5"
 dependencies = [
+ "aes-gcm",
  "agora-core",
  "base64 0.22.1",
  "openmls",
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "openmls_traits",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "sha2 0.10.9",

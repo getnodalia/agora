@@ -42,6 +42,10 @@ max_body_bytes = 1048576
 # Largest file people can share in a conversation, in bytes (at most 512 MB). Files are
 # stored encrypted in the database.
 max_file_bytes = 104857600
+# People in one call.
+call_participants = 12
+# Audio and video one device may send into a call, in bytes per second.
+call_bytes_per_second = 1048576
 
 [updates]
 # Install new stable releases by themselves: the agora-server-update.timer checks once a day,

@@ -9,12 +9,14 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+aes-gcm.workspace = true
 agora-core.workspace = true
 base64.workspace = true
 openmls.workspace = true
 openmls_basic_credential.workspace = true
 openmls_rust_crypto.workspace = true
 openmls_traits.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
