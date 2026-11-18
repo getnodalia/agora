@@ -12,7 +12,9 @@
 
 pub mod backup;
 mod channels;
+pub mod github_events;
 pub mod messages;
+pub mod mfa;
 pub mod mls;
 pub mod organizations;
 mod rows;
@@ -45,6 +47,8 @@ pub enum StoreError {
     Database(#[from] sqlx::Error),
     #[error("migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("invalid MFA storage input")]
+    InvalidMfa,
     #[error("stored data is invalid: {0}")]
     Corrupt(String),
 }

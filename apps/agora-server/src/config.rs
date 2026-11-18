@@ -29,6 +29,9 @@ pub struct Config {
     pub allow_insecure_public_bind: bool,
     pub limits: Limits,
     pub updates: Updates,
+    /// Configured by the server operator in environment variables, never TOML.
+    #[serde(skip)]
+    pub github_webhook: Option<GitHubWebhook>,
 }
 
 /// Self-updates: `agora-server self-update --auto`, which the `agora-server-update.timer`
@@ -44,6 +47,23 @@ pub struct Updates {
 impl Default for Updates {
     fn default() -> Self {
         Self { automatic: true }
+    }
+}
+
+#[derive(Clone)]
+pub struct GitHubWebhook {
+    pub workspace: i64,
+    pub repository: u64,
+    pub secret: String,
+}
+
+impl std::fmt::Debug for GitHubWebhook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitHubWebhook")
+            .field("workspace", &self.workspace)
+            .field("repository", &self.repository)
+            .field("secret", &"[redacted]")
+            .finish()
     }
 }
 
@@ -105,6 +125,7 @@ impl Default for Config {
             allow_insecure_public_bind: false,
             limits: Limits::default(),
             updates: Updates::default(),
+            github_webhook: None,
         }
     }
 }
@@ -135,6 +156,8 @@ pub enum ConfigError {
     InsecureBind(SocketAddr),
     #[error("session_days must be between 1 and 365")]
     SessionDays,
+    #[error("GitHub webhook configuration is incomplete or invalid")]
+    GitHubWebhook,
 }
 
 impl Config {
@@ -188,11 +211,30 @@ impl Config {
         if let Some(v) = get("AGORA_TRUST_PROXY") {
             self.trust_proxy = matches!(v.as_str(), "1" | "true" | "yes");
         }
+        let workspace = get("AGORA_GITHUB_WORKSPACE_ID");
+        let repository = get("AGORA_GITHUB_REPOSITORY_ID");
+        let secret = get("AGORA_GITHUB_WEBHOOK_SECRET");
+        if workspace.is_some() || repository.is_some() || secret.is_some() {
+            self.github_webhook = Some(GitHubWebhook {
+                workspace: workspace
+                    .and_then(|v| v.parse().ok())
+                    .ok_or(ConfigError::GitHubWebhook)?,
+                repository: repository
+                    .and_then(|v| v.parse().ok())
+                    .ok_or(ConfigError::GitHubWebhook)?,
+                secret: secret.ok_or(ConfigError::GitHubWebhook)?,
+            });
+        }
         Ok(())
     }
 
     /// Refuse configurations that would be unsafe on a public network.
     pub fn check(&self) -> Result<(), ConfigError> {
+        if self.github_webhook.as_ref().is_some_and(|g| {
+            g.workspace <= 0 || g.repository == 0 || g.secret.len() < 32 || g.secret.len() > 256
+        }) {
+            return Err(ConfigError::GitHubWebhook);
+        }
         if !(1..=365).contains(&self.session_days) {
             return Err(ConfigError::SessionDays);
         }
@@ -206,6 +248,29 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_configuration_requires_all_fields_and_never_debugs_secret() {
+        let mut config = Config::default();
+        assert!(matches!(
+            config.apply_env(|name| (name == "AGORA_GITHUB_WORKSPACE_ID").then(|| "1".into())),
+            Err(ConfigError::GitHubWebhook)
+        ));
+        let mut config = Config::default();
+        let secret = "private-secret-that-has-32-characters";
+        config
+            .apply_env(|name| match name {
+                "AGORA_GITHUB_WORKSPACE_ID" => Some("1".into()),
+                "AGORA_GITHUB_REPOSITORY_ID" => Some("123".into()),
+                "AGORA_GITHUB_WEBHOOK_SECRET" => Some(secret.into()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(config.check().is_ok());
+        assert!(!format!("{config:?}").contains(secret));
+        config.github_webhook.as_mut().unwrap().secret = "short".into();
+        assert!(matches!(config.check(), Err(ConfigError::GitHubWebhook)));
+    }
 
     #[test]
     fn the_example_file_matches_the_defaults() {

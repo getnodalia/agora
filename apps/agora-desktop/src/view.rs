@@ -482,6 +482,9 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
             });
         }
         ui.separator();
+        if model.workspace.is_some() && ui.button(tr("GitHub activity")).clicked() {
+            actions.push(Action::OpenGitHubEvents);
+        }
         if ui.button(tr("Organizations")).clicked() {
             actions.push(Action::OpenOrganizations);
         }
