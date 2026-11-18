@@ -70,6 +70,7 @@ pub enum Dialog {
         id: MessageId,
     },
     Organizations(OrganizationDialog),
+    Security(crate::security::SecurityDialog),
     Preferences,
     About,
     Shortcuts,
@@ -96,6 +97,7 @@ impl Dialog {
             Dialog::Edit { .. } => tr("Edit message"),
             Dialog::ConfirmDelete { .. } => tr("Delete this message?"),
             Dialog::Organizations(_) => tr("Organizations"),
+            Dialog::Security(_) => tr("Security and devices"),
             Dialog::Preferences => tr("Preferences"),
             Dialog::About => tr("About Ágora"),
             Dialog::Shortcuts => tr("Keyboard shortcuts"),
@@ -140,7 +142,7 @@ pub fn show(
                 });
             });
             ui.add_space(12.0);
-            if matches!(dialog, Dialog::Organizations(_)) {
+            if matches!(dialog, Dialog::Organizations(_) | Dialog::Security(_)) {
                 let max_height = (ctx.content_rect().height() - 140.0).max(120.0);
                 egui::ScrollArea::vertical()
                     .id_salt("organization-dialog-body")
@@ -294,6 +296,7 @@ fn body(
                 actions.push(Action::RefreshGitHubEvents);
             }
         }
+        Dialog::Security(state) => crate::security::show(ui, look, state, actions),
         Dialog::Organizations(state) => {
             ui.label(tr("Companies contain separate workspaces. Membership alone does not grant access to every workspace."));
             if state.pending {
@@ -702,7 +705,7 @@ fn about(ui: &mut Ui, look: &Look) {
         ui.label(RichText::new(tr("Everything that happens here stays on your server.")).color(color(p.text_secondary)));
         ui.add_space(8.0);
         ui.label(
-            RichText::new(tr("End-to-end encryption is not available. Use TLS (https) for any server outside your computer."))
+            RichText::new(tr("Messages are end-to-end encrypted with MLS: the server stores only ciphertext. Use TLS (https) for any server outside your computer."))
                 .size(font_size::SMALL)
                 .color(color(p.status_warning_fg)),
         );

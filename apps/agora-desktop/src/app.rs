@@ -88,6 +88,8 @@ pub enum Action {
     OpenGitHubEvents,
     RefreshGitHubEvents,
     OpenOrganizations,
+    /// Open the security dialog (with `Load`) or act inside it.
+    Security(crate::security::SecurityAction),
     SelectOrganization(OrganizationId),
     CreateOrganization(String),
     CreateOrganizationWorkspace(OrganizationId, String),
@@ -280,8 +282,15 @@ impl App {
         form.error = None;
         let username = form.username.trim().to_lowercase();
         let password = form.password.clone();
-        // A device kept on disk only when the session is: otherwise it lives as long as the window.
-        let dir = self.settings.remember.then(|| self.dir.clone()).flatten();
+        let code = form.code.trim().to_string();
+        let (totp, recovery_code) = match (form.mfa, form.use_recovery) {
+            (false, _) => (None, None),
+            (true, false) => (Some(code), None),
+            (true, true) => (None, Some(code)),
+        };
+        // The device stays on this computer whether or not the session does: signing in again
+        // is then the same device, with what it already read. "Forget this computer" removes it.
+        let dir = self.dir.clone();
         let secured = move |client: Client, session: SessionResponse| async move {
             let path =
                 settings::device_path(dir.as_deref(), client.base().as_str(), session.user.id);
@@ -304,7 +313,13 @@ impl App {
             });
         } else {
             self.net.run(async move {
-                let result = match client.login(&username, &password).await {
+                let request = agora_protocol::LoginRequest {
+                    username,
+                    password,
+                    totp,
+                    recovery_code,
+                };
+                let result = match client.login_with(&request).await {
                     Ok((client, session)) => secured(client, session).await,
                     Err(e) => Err(e),
                 };
@@ -425,8 +440,17 @@ impl App {
                 Err(e) => {
                     if let Screen::SignIn(form) = &mut self.screen {
                         form.busy = false;
-                        form.error = Some(e.to_string());
-                        form.password.clear();
+                        if e.code() == Some(agora_protocol::ErrorCode::MfaRequired) {
+                            // The password was right: keep it and ask for the second factor.
+                            form.error = form
+                                .mfa
+                                .then(|| tr("That code is not valid. Check the time on this computer and try again.").to_string());
+                            form.mfa = true;
+                            form.code.clear();
+                        } else {
+                            form.error = Some(e.to_string());
+                            form.password.clear();
+                        }
                     }
                 }
             },
@@ -602,6 +626,13 @@ impl Main {
                 }
             }
             Reply::Members(ws, result) => self.model.set_members(ws, result?),
+            Reply::Security(reply) => {
+                if let Some(dialogs::Dialog::Security(d)) = &mut self.dialog {
+                    if d.answer(reply) {
+                        d.act(net, &self.client, crate::security::SecurityAction::Load);
+                    }
+                }
+            }
             Reply::Organizations(generation, result) => {
                 if let Some(dialogs::Dialog::Organizations(d)) = &mut self.dialog {
                     if d.generation == generation {
@@ -1034,6 +1065,14 @@ impl Main {
                         client.github_events(workspace).await,
                     )
                 });
+            }
+            Action::Security(action) => {
+                if !matches!(self.dialog, Some(dialogs::Dialog::Security(_))) {
+                    self.dialog = Some(dialogs::Dialog::Security(Default::default()));
+                }
+                if let Some(dialogs::Dialog::Security(d)) = &mut self.dialog {
+                    d.act(net, &self.client, action);
+                }
             }
             Action::OpenOrganizations => {
                 self.organization_generation = self.organization_generation.wrapping_add(1);

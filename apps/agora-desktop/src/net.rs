@@ -31,6 +31,7 @@ pub enum Reply {
     ChannelLeft(ChannelId, Result<()>),
     Members(WorkspaceId, Result<Vec<Member>>),
     Organizations(u64, Result<Vec<Organization>>),
+    Security(crate::security::SecurityReply),
     OrganizationDetails(u64, OrganizationId, Result<(Vec<Workspace>, Vec<Member>)>),
     OrganizationCreated(u64, Result<Organization>),
     OrganizationWorkspaceCreated(u64, OrganizationId, Result<Workspace>),

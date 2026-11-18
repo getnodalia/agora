@@ -21,6 +21,7 @@ mod i18n;
 mod icon;
 mod model;
 mod net;
+mod security;
 mod settings;
 mod signin;
 mod view;
