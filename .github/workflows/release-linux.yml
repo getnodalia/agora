@@ -128,9 +128,9 @@ jobs:
           sha256sum -c SHA256SUMS
           app="agora-$VERSION-linux-x86_64.AppImage"
           chmod +x "$app"
-          # No FUSE in a container: unpack the image and start the binary it carries.
+          # No FUSE in a container: unpack the image and start it through its own AppRun.
           "./$app" --appimage-extract >/dev/null
-          squashfs-root/usr/bin/agora --version | tee version.txt
+          squashfs-root/AppRun --version | tee version.txt
           grep -q "agora $VERSION" version.txt
           if command -v dnf >/dev/null; then dnf -y install tar gzip shadow-utils util-linux >/dev/null; fi
           # The server tarball's installer, as on a headless machine (no systemd in a container,
