@@ -14,7 +14,12 @@ Authenticated requests carry `Authorization: Bearer <token>`. Errors are
 |---|---|
 | `GET /server` | Name, version, API version, registration policy (no auth) |
 | `POST /auth/register` | `{username, display_name, password, invite_code?}` → session |
-| `POST /auth/login` | `{username, password}` → `{token, expires_at, user}` |
+| `POST /auth/login` | `{username, password, totp?, recovery_code?}` → `{token, expires_at, user}`; `mfa_required` when the account has two-step verification and no valid code was sent |
+| `GET /auth/mfa` | `{enabled, recovery_codes_left}` for the caller |
+| `POST /auth/mfa/setup` | `{password}` → `{secret, uri}`: a new authenticator secret, pending for 10 minutes |
+| `POST /auth/mfa/enable` | `{code}` → `{recovery_codes}` (shown once); other sessions are signed out |
+| `POST /auth/mfa/disable` | `{password, code}` |
+| `POST /auth/mfa/recovery-codes` | `{code}` → `{recovery_codes}`: replaces the old ones |
 | `POST /auth/logout` | Ends this session and closes its sockets |
 | `GET /me`, `PATCH /me` | The signed-in user; change the display name |
 | `GET /workspaces`, `POST /workspaces` | Workspaces the caller belongs to; create one (with `#general`) |
@@ -40,6 +45,8 @@ Authenticated requests carry `Authorization: Bearer <token>`. Errors are
 
 | Method and path | What |
 |---|---|
+| `GET /devices` | The caller's devices: `[{public_key, created_at, last_seen_at, this_device, signed_in}]` |
+| `POST /devices/remove` | `{public_key}`: remove one of the caller's devices and sign it out |
 | `PUT /devices/me` | `{public_key}`: this session's device (its MLS signature key) → `{key_packages}` left |
 | `POST /devices/me/key_packages` | `{key_packages}`: publish MLS key packages of this device |
 | `GET /channels/{id}/mls?after=` | The conversation's epoch, latest GroupInfo, the devices that may read it, the log after `after`, and a Welcome waiting for this device |

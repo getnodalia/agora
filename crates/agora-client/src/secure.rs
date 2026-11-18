@@ -123,6 +123,7 @@ pub struct Secure {
     client: Client,
     inner: Arc<Mutex<Inner>>,
     fingerprint: String,
+    public_key: String,
     user: UserId,
 }
 
@@ -149,6 +150,7 @@ impl Secure {
             None => Device::new(user).map_err(crypto)?,
         };
         let fingerprint = device.fingerprint();
+        let public_key = STANDARD.encode(device.public_key());
         let mut inner = Inner { device, path };
         let status = client
             .register_device(&STANDARD.encode(inner.device.public_key()))
@@ -159,11 +161,19 @@ impl Secure {
             client: client.clone(),
             inner: Arc::new(Mutex::new(inner)),
             fingerprint,
+            public_key,
             user,
         })
     }
 
-    /// Delete a device file (on logout: its keys and the messages it decrypted).
+    /// This device's signing key, base64, as the server lists it.
+    pub fn public_key_base64(&self) -> String {
+        self.public_key.clone()
+    }
+
+    /// Delete a device file: its keys and the messages it decrypted. Logging out keeps it, so
+    /// signing in again on the same computer is the same device; this is for "forget this
+    /// computer".
     pub fn wipe(path: &Path) {
         let _ = std::fs::remove_file(path);
     }

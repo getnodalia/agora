@@ -28,6 +28,9 @@ pub struct Config {
     /// tokens would cross the network in clear text: only for an isolated lab network.
     pub allow_insecure_public_bind: bool,
     pub limits: Limits,
+    /// File holding the 256-bit key that seals two-step verification secrets. Default: next to
+    /// the database (`agora.db.mfa-key`), created on first start. Back it up with the database.
+    pub mfa_key_file: Option<std::path::PathBuf>,
     /// Configured by the server operator in environment variables, never TOML.
     #[serde(skip)]
     pub github_webhook: Option<GitHubWebhook>,
@@ -107,6 +110,7 @@ impl Default for Config {
             trust_proxy: false,
             allow_insecure_public_bind: false,
             limits: Limits::default(),
+            mfa_key_file: None,
             github_webhook: None,
         }
     }
@@ -189,6 +193,9 @@ impl Config {
                     })
                 }
             };
+        }
+        if let Some(v) = get("AGORA_MFA_KEY_FILE") {
+            self.mfa_key_file = Some(v.into());
         }
         if let Some(v) = get("AGORA_TRUST_PROXY") {
             self.trust_proxy = matches!(v.as_str(), "1" | "true" | "yes");

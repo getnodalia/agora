@@ -156,10 +156,80 @@ pub async fn login(
         .as_ref()
         .map_or_else(|| state.dummy_hash.to_string(), |(_, h)| h.clone());
     let ok = auth::verify_password(req.password, hash).await;
-    match found {
-        Some((user, _)) if ok => Ok(Json(new_session(&state, user).await?)),
-        _ => Err(wrong()),
+    let user = match found {
+        Some((user, _)) if ok => user,
+        _ => return Err(wrong()),
+    };
+    if !state.store.has_totp(user.id).await? {
+        return Ok(Json(new_session(&state, user).await?));
     }
+    let totp = req.totp.as_deref().map(crate::mfa_crypto::normalize_code);
+    let recovery = req
+        .recovery_code
+        .as_deref()
+        .map(crate::mfa_crypto::normalize_code);
+    if totp.as_deref().is_none_or(str::is_empty) && recovery.as_deref().is_none_or(str::is_empty) {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::MfaRequired,
+            "enter the code from your authenticator app",
+        ));
+    }
+    // Codes are guessable in a way passwords are not: limit them per account as well.
+    if !state.limiter.allow(
+        &format!("mfa:{}", user.id),
+        state.config.limits.auth_per_minute.min(5),
+    ) {
+        return Err(AppError::rate_limited());
+    }
+    let token = auth::random_token(32);
+    let now = now_ms();
+    let expires_at = now.saturating_add(i64::from(state.config.session_days) * 86_400_000);
+    let hash = auth::token_hash(&token);
+    let created = match (totp.filter(|c| !c.is_empty()), recovery) {
+        (Some(code), _) => {
+            crate::mfa_service::verify_totp_and_create_session(
+                &state.store,
+                &state.mfa.key,
+                user.id,
+                &code,
+                &hash,
+                now,
+                expires_at,
+            )
+            .await
+        }
+        (None, Some(code)) => {
+            crate::mfa_service::verify_recovery_and_create_session(
+                &state.store,
+                user.id,
+                &code,
+                &hash,
+                now,
+                expires_at,
+            )
+            .await
+        }
+        (None, None) => Ok(None),
+    }
+    .map_err(|e| {
+        tracing::error!(error = %e, "two-step sign-in failed");
+        AppError::internal()
+    })?;
+    if created.is_none() {
+        let mut e = AppError::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::MfaRequired,
+            "that code is not valid",
+        );
+        e.body.field = Some("code".into());
+        return Err(e);
+    }
+    Ok(Json(SessionResponse {
+        token,
+        expires_at,
+        user,
+    }))
 }
 
 pub async fn logout(State(state): State<AppState>, auth: Auth) -> AppResult<StatusCode> {

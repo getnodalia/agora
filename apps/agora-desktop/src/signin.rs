@@ -25,6 +25,11 @@ pub struct Form {
     pub info: Option<ServerCheck>,
     /// The address `info` belongs to.
     pub info_for: String,
+    /// The account has two-step verification: ask for a code after the password.
+    pub mfa: bool,
+    pub code: String,
+    /// Typing a recovery code instead of an authenticator code.
+    pub use_recovery: bool,
 }
 
 impl Form {
@@ -41,6 +46,9 @@ impl Form {
             notice: None,
             info: None,
             info_for: String::new(),
+            mfa: false,
+            code: String::new(),
+            use_recovery: false,
         }
     }
 }
@@ -166,6 +174,40 @@ fn form_card(
             field_label(ui, look, tr("Invitation code (if you have one)"));
             field(ui, look, &mut form.invite, "", false);
         }
+        let mut code_submitted = false;
+        if form.mfa && !form.register {
+            ui.add_space(6.0);
+            status_line(
+                ui,
+                look,
+                tr("This account uses two-step verification."),
+                false,
+            );
+            let (label, hint) = if form.use_recovery {
+                (tr("Recovery code"), "")
+            } else {
+                (tr("Code from your authenticator app"), "123456")
+            };
+            field_label(ui, look, label);
+            let code = field(ui, look, &mut form.code, hint, false);
+            code_submitted = code.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            let switch = if form.use_recovery {
+                tr("Use the authenticator app")
+            } else {
+                tr("Use a recovery code")
+            };
+            if ui
+                .link(
+                    RichText::new(switch)
+                        .size(font_size::SMALL)
+                        .color(color(p.accent_text)),
+                )
+                .clicked()
+            {
+                form.use_recovery = !form.use_recovery;
+                form.code.clear();
+            }
+        }
         ui.add_space(6.0);
         ui.checkbox(remember, tr("Keep me signed in on this computer"));
 
@@ -179,13 +221,15 @@ fn form_card(
             && !form.server.trim().is_empty()
             && !form.username.trim().is_empty()
             && !form.password.is_empty()
-            && (!form.register || !form.display_name.trim().is_empty());
+            && (!form.register || !form.display_name.trim().is_empty())
+            && (!form.mfa || form.register || !form.code.trim().is_empty());
         let label = if form.register {
             tr("Create account")
         } else {
             tr("Sign in")
         };
-        let submitted = password.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+        let submitted =
+            code_submitted || (password.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             let button = cr::primary_button_min(ui, look, label, ready, width - 48.0);
             if (button.clicked() || submitted) && ready {
@@ -207,6 +251,8 @@ fn form_card(
             {
                 form.register = !form.register;
                 form.error = None;
+                form.mfa = false;
+                form.code.clear();
             }
         });
     });

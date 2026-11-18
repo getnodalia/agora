@@ -99,7 +99,9 @@ In the desktop app, the server is `https://chat.example.org`.
 
 ## Backups
 
-The database is `agora.db` with its `-wal` file. Back up with SQLite's online backup, which is
+The database is `agora.db` with its `-wal` file, and `agora.db.mfa-key` beside it seals the
+two-step verification secrets. Back up the key file too, and keep it apart from database
+copies: without it, people with two-step verification sign in with a recovery code. Back up with SQLite's online backup, which is
 safe while the server runs:
 
 ```sh

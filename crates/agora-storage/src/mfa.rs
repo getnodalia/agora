@@ -1,4 +1,5 @@
-//! Atomic MFA persistence primitives. No route calls them yet; they do not enforce MFA alone.
+//! Atomic MFA persistence: the TOTP factor, recovery codes and session issuance after a second
+//! factor. Sign-in enforces the factor through these functions (`apps/agora-server`).
 
 use crate::{Result, Store, StoreError};
 use agora_core::UserId;
@@ -111,6 +112,88 @@ impl Store {
             .bind(session_hash).bind(user.0).bind(now).bind(expires_at).bind(now).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok(Some(id))
+    }
+}
+
+impl Store {
+    /// Whether the account has a TOTP factor.
+    pub async fn has_totp(&self, user: UserId) -> Result<bool> {
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mfa_totp WHERE user_id = ?")
+            .bind(user.0)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(n > 0)
+    }
+
+    /// Recovery codes not yet used.
+    pub async fn recovery_codes_left(&self, user: UserId) -> Result<i64> {
+        Ok(
+            sqlx::query_scalar("SELECT COUNT(*) FROM mfa_recovery_codes WHERE user_id = ?")
+                .bind(user.0)
+                .fetch_one(&self.pool)
+                .await?,
+        )
+    }
+
+    /// Remove the factor and its recovery codes. The caller must have verified the password and
+    /// a current code. Returns whether a factor existed.
+    pub async fn remove_totp(&self, user: UserId) -> Result<bool> {
+        let n = sqlx::query("DELETE FROM mfa_totp WHERE user_id = ?")
+            .bind(user.0)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        Ok(n > 0)
+    }
+
+    /// Replace every recovery code in one transaction, for an account that has a factor.
+    pub async fn replace_recovery_codes(
+        &self,
+        user: UserId,
+        recovery_hashes: &[[u8; 32]],
+    ) -> Result<bool> {
+        if recovery_hashes.len() != RECOVERY_COUNT {
+            return Err(StoreError::InvalidMfa);
+        }
+        let mut tx = self.pool.begin().await?;
+        let has: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mfa_totp WHERE user_id = ?")
+            .bind(user.0)
+            .fetch_one(&mut *tx)
+            .await?;
+        if has == 0 {
+            return Ok(false);
+        }
+        sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_id = ?")
+            .bind(user.0)
+            .execute(&mut *tx)
+            .await?;
+        for hash in recovery_hashes {
+            sqlx::query("INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES (?, ?)")
+                .bind(user.0)
+                .bind(hash.as_slice())
+                .execute(&mut *tx)
+                .await
+                .map_err(crate::conflict)?;
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    /// Accept a TOTP step for an already signed-in account (disabling the factor, new recovery
+    /// codes) without issuing a session. One-time use like sign-in.
+    pub async fn consume_totp_step(&self, user: UserId, step: i64) -> Result<bool> {
+        if step < 0 {
+            return Err(StoreError::InvalidMfa);
+        }
+        let changed =
+            sqlx::query("UPDATE mfa_totp SET last_step = ? WHERE user_id = ? AND last_step < ?")
+                .bind(step)
+                .bind(user.0)
+                .bind(step)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        Ok(changed > 0)
     }
 }
 
