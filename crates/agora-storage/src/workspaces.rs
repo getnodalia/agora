@@ -28,6 +28,32 @@ pub struct NewInvite<'a> {
 }
 
 impl Store {
+    /// The stored PNG is metadata visible to workspace members, not encrypted content.
+    pub async fn workspace_icon(&self, id: WorkspaceId) -> Result<Option<Vec<u8>>> {
+        Ok(
+            sqlx::query_scalar::<_, Option<Vec<u8>>>(
+                "SELECT icon_png FROM workspaces WHERE id = ?",
+            )
+            .bind(id.0)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten(),
+        )
+    }
+
+    /// Set or remove an icon. Authorization belongs to the caller.
+    pub async fn set_workspace_icon(&self, id: WorkspaceId, icon: Option<&[u8]>) -> Result<()> {
+        let result = sqlx::query("UPDATE workspaces SET icon_png = ? WHERE id = ?")
+            .bind(icon)
+            .bind(id.0)
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     /// Create a workspace owned by `owner`, with a default `#general` channel.
     pub async fn create_workspace(
         &self,

@@ -10,8 +10,8 @@ use agora_client::{Client, ClientError, Realtime, RealtimeEvent, Secure};
 use agora_core::{ChannelId, MessageId, OrganizationId, WorkspaceId};
 use agora_e2e::Leaf;
 use agora_protocol::{
-    Channel, Invite, Member, Message, MessagePage, Organization, Reaction, SearchResults,
-    ServerEvent, ServerInfo, SessionResponse, Thread, User, Workspace,
+    Channel, GitHubEvent, Invite, Member, Message, MessagePage, Organization, Reaction,
+    SearchResults, ServerEvent, ServerInfo, SessionResponse, Thread, User, Workspace,
 };
 
 pub type Result<T> = std::result::Result<T, ClientError>;
@@ -35,6 +35,7 @@ pub enum Reply {
     OrganizationCreated(u64, Result<Organization>),
     OrganizationWorkspaceCreated(u64, OrganizationId, Result<Workspace>),
     OrganizationMemberChanged(u64, OrganizationId, Result<()>),
+    GitHubEvents(u64, WorkspaceId, Result<Vec<GitHubEvent>>),
     /// A page of history. `before` is set for older pages; `after` for a catch-up.
     History {
         channel: ChannelId,

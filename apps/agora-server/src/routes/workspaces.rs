@@ -4,8 +4,9 @@ use agora_protocol::{
     User, Workspace,
 };
 use agora_storage::workspaces::NewInvite;
+use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::Json;
 
 use super::workspace_role;
@@ -15,6 +16,87 @@ use crate::state::AppState;
 
 /// Workspaces one person may create; keeps a single account from filling the disk.
 const CREATED_MAX: usize = 50;
+
+/// Icons are bounded metadata, never treated as encrypted content.
+pub(super) const ICON_MAX_BYTES: usize = 128 * 1024;
+const ICON_MAX_DIMENSION: u32 = 512;
+
+fn valid_icon(bytes: &[u8]) -> bool {
+    if bytes.is_empty() || bytes.len() > ICON_MAX_BYTES {
+        return false;
+    }
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let Ok(mut reader) = decoder.read_info() else {
+        return false;
+    };
+    let info = reader.info();
+    if info.width == 0
+        || info.height == 0
+        || info.width > ICON_MAX_DIMENSION
+        || info.height > ICON_MAX_DIMENSION
+        || info.animation_control.is_some()
+        || reader.output_buffer_size() > 2 * 1024 * 1024
+    {
+        return false;
+    }
+    let mut output = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut output).is_ok()
+}
+
+pub async fn get_icon(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<([(header::HeaderName, &'static str); 1], Vec<u8>)> {
+    let ws = WorkspaceId(id);
+    workspace_role(&state, ws, auth.user.id).await?;
+    let icon = state
+        .store
+        .workspace_icon(ws)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    Ok(([(header::CONTENT_TYPE, "image/png")], icon))
+}
+
+pub async fn put_icon(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+    bytes: Bytes,
+) -> AppResult<StatusCode> {
+    let ws = WorkspaceId(id);
+    let role = workspace_role(&state, ws, auth.user.id).await?;
+    if !role.is_admin() {
+        return Err(AppError::forbidden(
+            "only workspace owners and admins can change the icon",
+        ));
+    }
+    super::check_write(&state, auth.user.id)?;
+    if !valid_icon(&bytes) {
+        return Err(AppError::invalid(
+            "icon must be a static PNG of at most 512 × 512 pixels and 128 KiB",
+        ));
+    }
+    state.store.set_workspace_icon(ws, Some(&bytes)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn delete_icon(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<StatusCode> {
+    let ws = WorkspaceId(id);
+    let role = workspace_role(&state, ws, auth.user.id).await?;
+    if !role.is_admin() {
+        return Err(AppError::forbidden(
+            "only workspace owners and admins can change the icon",
+        ));
+    }
+    super::check_write(&state, auth.user.id)?;
+    state.store.set_workspace_icon(ws, None).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
 pub async fn list(State(state): State<AppState>, auth: Auth) -> AppResult<Json<Vec<Workspace>>> {
     Ok(Json(state.store.workspaces_of(auth.user.id).await?))

@@ -85,6 +85,8 @@ pub enum Panel {
 /// Something a screen asked for.
 #[derive(Clone, Debug)]
 pub enum Action {
+    OpenGitHubEvents,
+    RefreshGitHubEvents,
     OpenOrganizations,
     SelectOrganization(OrganizationId),
     CreateOrganization(String),
@@ -508,6 +510,29 @@ impl Main {
         notifications: bool,
     ) -> Result<(), ClientError> {
         match reply {
+            Reply::GitHubEvents(generation, workspace, result) => {
+                if let Some(dialogs::Dialog::GitHubEvents {
+                    generation: active,
+                    workspace: selected,
+                    events,
+                    pending,
+                    failed,
+                }) = &mut self.dialog
+                {
+                    if *active == generation && *selected == workspace {
+                        *pending = false;
+                        match result {
+                            Ok(received) => {
+                                *events = received;
+                                *failed = false;
+                            }
+                            Err(_) => {
+                                *failed = true;
+                            }
+                        }
+                    }
+                }
+            }
             Reply::Workspaces(result) => {
                 self.model.set_workspaces(result?);
                 for ws in self
@@ -959,6 +984,44 @@ impl Main {
 
     fn act(&mut self, net: &Net, action: Action, now: f64) {
         match action {
+            Action::OpenGitHubEvents => {
+                let Some(workspace) = self.model.workspace else {
+                    return;
+                };
+                self.organization_generation = self.organization_generation.wrapping_add(1);
+                self.dialog = Some(dialogs::Dialog::GitHubEvents {
+                    generation: self.organization_generation,
+                    workspace,
+                    events: Vec::new(),
+                    pending: false,
+                    failed: false,
+                });
+                self.act(net, Action::RefreshGitHubEvents, now);
+            }
+            Action::RefreshGitHubEvents => {
+                let Some(dialogs::Dialog::GitHubEvents {
+                    generation,
+                    workspace,
+                    pending,
+                    ..
+                }) = &mut self.dialog
+                else {
+                    return;
+                };
+                if *pending {
+                    return;
+                }
+                *pending = true;
+                let (generation, workspace) = (*generation, *workspace);
+                let client = self.client.clone();
+                net.run(async move {
+                    Reply::GitHubEvents(
+                        generation,
+                        workspace,
+                        client.github_events(workspace).await,
+                    )
+                });
+            }
             Action::OpenOrganizations => {
                 self.organization_generation = self.organization_generation.wrapping_add(1);
                 let generation = self.organization_generation;
