@@ -4,7 +4,7 @@ This experimental server-side inbox receives a limited set of GitHub repository 
 It is separate from conversations: the event type, action, issue or pull request number, receipt
 time, delivery identifier and a hash of the payload are server-readable metadata. Payloads,
 titles, comments and secrets are not saved. No integration can read encrypted Ágora messages.
-The desktop app cannot configure or display the inbox yet.
+The desktop app displays the latest activity but cannot configure the inbox yet.
 
 The server operator can configure one repository and one workspace using all three environment
 variables: `AGORA_GITHUB_WORKSPACE_ID`, `AGORA_GITHUB_REPOSITORY_ID` (GitHub's numeric repository
@@ -27,5 +27,5 @@ limit are rejected, and GitHub may require manual redelivery after a failure.
 Workspace members can read the latest 100 records using authenticated
 `GET /api/v1/workspaces/{id}/integrations/github/events`; non-members get 404. This initial API
 does not support multiple installations, administrator configuration or revocation without a
-restart, filtering by channel, fine-grained event permissions, pagination, or a live desktop view.
+restart, filtering by channel, fine-grained event permissions, pagination, or automatic refresh.
 Do not treat it as a complete integrations platform.

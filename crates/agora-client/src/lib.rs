@@ -289,6 +289,12 @@ impl Client {
         self.get("/workspaces").await
     }
 
+    /// The workspace's server-readable GitHub inbox, separate from encrypted chat messages.
+    pub async fn github_events(&self, ws: WorkspaceId) -> Result<Vec<GitHubEvent>> {
+        self.get(&format!("/workspaces/{ws}/integrations/github/events"))
+            .await
+    }
+
     pub async fn create_workspace(&self, name: &str) -> Result<Workspace> {
         self.post(
             "/workspaces",
