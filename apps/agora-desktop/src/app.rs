@@ -1016,6 +1016,8 @@ impl Main {
                 let effects = self.model.apply(event, now);
                 self.run_effects(net, effects);
             }
+            // This device does not take part in calls yet.
+            RealtimeEvent::Media(_) => {}
             RealtimeEvent::Disconnected { retry_in, .. } => {
                 self.model.connection = Connection::Retrying(retry_in.as_secs().max(1));
             }

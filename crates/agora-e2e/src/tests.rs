@@ -277,3 +277,42 @@ fn an_offline_device_is_added_with_its_key_package_and_reads_from_then_on() {
     assert_eq!(ben.plaintext(after), Some("while Ben was away"));
     assert_eq!(ana.members(CH).len(), 2);
 }
+
+#[test]
+fn a_call_key_is_shared_by_the_members_and_moves_on_without_a_removed_device() {
+    use crate::call::{Opener, Sealer, Stream};
+    let mut server = Server::default();
+    let (mut ana, mut ben, mut eva) = (device(1), device(2), device(3));
+    assert!(matches!(ana.call_key(CH), Err(Error::NoGroup)));
+    server.enter(&mut ana);
+    server.enter(&mut ben);
+    server.enter(&mut eva);
+    server.sync(&mut ana);
+    server.sync(&mut ben);
+
+    let key = ana.call_key(CH).unwrap();
+    assert_eq!(ben.call_key(CH).unwrap(), key);
+    assert_eq!(eva.call_key(CH).unwrap(), key);
+    let mut sealer = Sealer::new(CH, UserId(1), key.clone());
+    let mut opener = Opener::new(CH);
+    opener.add_key(ben.call_key(CH).unwrap());
+    let frame = sealer.seal(Stream::Audio, b"hola").unwrap();
+    assert_eq!(
+        opener.open(UserId(1), Stream::Audio, &frame).unwrap(),
+        b"hola"
+    );
+
+    // Eva's device is removed: the next epoch's key is one she cannot derive.
+    let p = ana
+        .remove(CH, |leaf| leaf.user != UserId(3))
+        .unwrap()
+        .unwrap();
+    let seq = server.commit(UserId(1), &p).unwrap();
+    ana.confirm(CH, Some(seq)).unwrap();
+    server.sync(&mut ben);
+    server.sync(&mut eva);
+    let next = ana.call_key(CH).unwrap();
+    assert_ne!(next, key);
+    assert_eq!(ben.call_key(CH).unwrap(), next);
+    assert!(eva.call_key(CH).is_err());
+}

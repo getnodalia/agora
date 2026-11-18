@@ -76,11 +76,31 @@ for people who joined after them. The formats of both are in `agora_core::conten
 
 ## WebSocket
 
-Client frames: `auth {token}` (first, within 10 s), `typing {channel_id, thread_root_id?}`, `ping`.
+Client frames: `auth {token}` (first, within 10 s), `typing {channel_id, thread_root_id?}`, `ping`,
+and for calls `call_join {channel_id, audio, video}`, `call_update {channel_id, audio, video}` and
+`call_leave {channel_id}`.
 
 Server events: `ready {user}`, `error {code, message}`, `message_created`, `message_updated`,
 `message_deleted`, `reactions_changed`, `channel_changed`, `channel_removed`, `member_joined`,
-`read_marker`, `receipt` (a member received or read more of a conversation), `integration_notice`, `typing`, `presence`, `mls_changed` (a conversation's group moved: catch up), `pong`.
+`read_marker`, `receipt` (a member received or read more of a conversation), `integration_notice`, `typing`, `presence`, `mls_changed` (a conversation's group moved: catch up),
+`call_changed {channel_id, participants}` (who is in a channel's call; empty means it ended; sent
+to everyone who can read the channel, and after `ready` for every call going on) and `call_left
+{channel_id, reason}` (`other_device`, `full` or `no_access`: this connection is not in the call),
+`pong`.
+
+### Calls
+
+Only channel members who can post there may join its call, and a connection is in at most one
+call; joining from a second device moves the person there. Audio and video travel as binary
+WebSocket frames (`agora_protocol::media`): a client sends `[1][kind][channel id, i64 big-endian]
+[payload]`, with kind `1` audio and `2` video, and the server relays
+`[1][kind][channel id][sender user id, i64 big-endian][payload]` to the others in the call. A
+payload is at most 60 KiB, and each connection may send `call_bytes_per_second` (1 MiB by
+default); frames over that, malformed, or for a call the connection is not in are dropped
+without an answer. The server never reads payloads: clients seal them end to end
+(`agora_e2e::call`), with AES-256-GCM under a key exported from the conversation's MLS group
+(label `agora call v1`, context the channel id), as `[epoch, u64][nonce, 12 bytes][ciphertext of
+sequence, u64, and media]`, the channel, sender, kind and epoch as associated data.
 
 Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last

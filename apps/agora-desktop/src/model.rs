@@ -6,8 +6,8 @@ use std::collections::{HashMap, HashSet};
 
 use agora_core::{ChannelId, ChannelKind, MessageId, UserId, WorkspaceId};
 use agora_protocol::{
-    Channel, IntegrationNotice, Member, Message, MessagePage, Reaction, Receipt, ServerEvent,
-    Thread, User, Workspace,
+    CallParticipant, Channel, IntegrationNotice, Member, Message, MessagePage, Reaction, Receipt,
+    ServerEvent, Thread, User, Workspace,
 };
 
 /// A message this client sent that the server has not confirmed yet.
@@ -158,6 +158,8 @@ pub struct Model {
     pub delivered: HashMap<ChannelId, MessageId>,
     /// What connected apps posted in each conversation, oldest first. Not end-to-end encrypted.
     pub notices: HashMap<ChannelId, Vec<IntegrationNotice>>,
+    /// Who is in each conversation's call, for the calls going on.
+    pub calls: HashMap<ChannelId, Vec<CallParticipant>>,
 }
 
 /// The most notices kept per conversation.
@@ -183,6 +185,7 @@ impl Model {
             receipts: HashMap::new(),
             delivered: HashMap::new(),
             notices: HashMap::new(),
+            calls: HashMap::new(),
         }
     }
 
@@ -554,6 +557,18 @@ impl Model {
             ServerEvent::IntegrationNotice { notice } => {
                 add_notice(self.notices.entry(notice.channel_id).or_default(), notice);
             }
+            ServerEvent::CallChanged {
+                channel_id,
+                participants,
+            } => {
+                if participants.is_empty() {
+                    self.calls.remove(&channel_id);
+                } else {
+                    self.calls.insert(channel_id, participants);
+                }
+            }
+            // This device does not take part in calls yet.
+            ServerEvent::CallLeft { .. } => {}
             ServerEvent::Typing {
                 channel_id,
                 thread_root_id,

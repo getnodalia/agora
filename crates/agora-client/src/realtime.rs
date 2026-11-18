@@ -37,6 +37,8 @@ pub enum RealtimeEvent {
         reconnected: bool,
     },
     Event(ServerEvent),
+    /// A binary frame of a call: decode it with [`agora_protocol::media::Down::parse`].
+    Media(Vec<u8>),
     /// The connection dropped; another attempt follows after `retry_in`.
     Disconnected {
         reason: String,
@@ -50,13 +52,23 @@ pub enum RealtimeEvent {
 #[derive(Debug)]
 pub struct Realtime {
     frames: mpsc::UnboundedSender<ClientFrame>,
+    media: mpsc::Sender<Vec<u8>>,
     task: JoinHandle<()>,
 }
+
+/// Call media waiting to go out. Beyond this, frames are dropped: late audio is worse than none.
+const MEDIA_QUEUE: usize = 32;
 
 impl Realtime {
     /// Queue a frame (typing notice) for the server. Dropped while disconnected.
     pub fn send(&self, frame: ClientFrame) {
         let _ = self.frames.send(frame);
+    }
+
+    /// Queue a binary call frame ([`agora_protocol::media::Up`]). Dropped while disconnected
+    /// or when the connection is behind.
+    pub fn send_media(&self, frame: Vec<u8>) {
+        let _ = self.media.try_send(frame);
     }
 
     pub fn close(self) {
@@ -77,10 +89,27 @@ where
     F: Fn(RealtimeEvent) + Send + Sync + 'static,
 {
     let (frames, rx) = mpsc::unbounded_channel();
+    let (media, media_rx) = mpsc::channel(MEDIA_QUEUE);
     let client = client.clone();
     let on_event = Arc::new(on_event);
-    let task = tokio::spawn(run(client, on_event, rx));
-    Realtime { frames, task }
+    let task = tokio::spawn(run(
+        client,
+        on_event,
+        Outbox {
+            frames: rx,
+            media: media_rx,
+        },
+    ));
+    Realtime {
+        frames,
+        media,
+        task,
+    }
+}
+
+struct Outbox {
+    frames: mpsc::UnboundedReceiver<ClientFrame>,
+    media: mpsc::Receiver<Vec<u8>>,
 }
 
 enum End {
@@ -96,7 +125,7 @@ fn backoff(attempt: u32) -> Duration {
     base.mul_f64(jitter)
 }
 
-async fn run<F>(client: Client, on_event: Arc<F>, mut frames: mpsc::UnboundedReceiver<ClientFrame>)
+async fn run<F>(client: Client, on_event: Arc<F>, mut frames: Outbox)
 where
     F: Fn(RealtimeEvent) + Send + Sync + 'static,
 {
@@ -130,7 +159,7 @@ where
 async fn session<F>(
     client: &Client,
     on_event: &F,
-    frames: &mut mpsc::UnboundedReceiver<ClientFrame>,
+    outbox: &mut Outbox,
     reconnected: bool,
 ) -> (End, bool)
 where
@@ -158,8 +187,9 @@ where
     if let Err(e) = sink.send(WsMessage::text(auth)).await {
         return (End::Dropped(e.to_string()), false);
     }
-    // Frames queued while disconnected (typing) are stale now.
-    while frames.try_recv().is_ok() {}
+    // Frames queued while disconnected (typing, media) are stale now.
+    while outbox.frames.try_recv().is_ok() {}
+    while outbox.media.try_recv().is_ok() {}
 
     let mut ready = false;
     let mut heartbeat = interval(HEARTBEAT);
@@ -181,6 +211,7 @@ where
                         // A newer server may send event types this client does not know yet.
                         Err(e) => tracing::debug!(error = %e, "ignoring an unknown event"),
                     },
+                    Some(Ok(WsMessage::Binary(bytes))) => on_event(RealtimeEvent::Media(bytes.to_vec())),
                     Some(Ok(WsMessage::Close(frame))) => {
                         if frame.as_ref().is_some_and(|f| u16::from(f.code) == 4001) {
                             return (End::Rejected, ready);
@@ -192,7 +223,16 @@ where
                     None => return (End::Dropped("connection closed".into()), ready),
                 }
             }
-            frame = frames.recv() => {
+            media = outbox.media.recv() => {
+                if let Some(media) = media {
+                    if ready {
+                        if let Err(e) = sink.send(WsMessage::binary(media)).await {
+                            return (End::Dropped(e.to_string()), ready);
+                        }
+                    }
+                }
+            }
+            frame = outbox.frames.recv() => {
                 let Some(frame) = frame else { return (End::Dropped("client closed".into()), ready) };
                 if ready {
                     let text = serde_json::to_string(&frame).unwrap_or_default();

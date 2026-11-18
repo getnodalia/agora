@@ -192,6 +192,15 @@ impl Secure {
         self.inner.lock().await.device.members(channel)
     }
 
+    /// The key that seals `channel`'s call now, after catching up with the conversation so it
+    /// matches the other devices'. Call again when the conversation's devices change.
+    pub async fn call_key(&self, channel: ChannelId) -> Result<agora_e2e::call::CallKey> {
+        let mut inner = self.inner.lock().await;
+        self.sync_locked(&mut inner, channel).await?;
+        inner.save()?;
+        inner.device.call_key(channel).map_err(crypto)
+    }
+
     /// Bring this device up to date with a conversation: join its group if needed and decrypt
     /// every new log entry, in order.
     pub async fn sync(&self, channel: ChannelId) -> Result<Vec<Change>> {

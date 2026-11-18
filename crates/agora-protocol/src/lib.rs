@@ -701,6 +701,25 @@ pub enum ClientFrame {
         thread_root_id: Option<MessageId>,
     },
     Ping,
+    /// Join the call in a channel (starting it if nobody is in it). A connection is in at most
+    /// one call; joining another leaves the first, and joining from a second device moves the
+    /// person there.
+    CallJoin {
+        channel_id: ChannelId,
+        #[serde(default)]
+        audio: bool,
+        #[serde(default)]
+        video: bool,
+    },
+    /// Say whether the microphone and camera are on.
+    CallUpdate {
+        channel_id: ChannelId,
+        audio: bool,
+        video: bool,
+    },
+    CallLeave {
+        channel_id: ChannelId,
+    },
 }
 
 /// What the server sends on the WebSocket. Clients ignore event types they do not know.
@@ -774,7 +793,203 @@ pub enum ServerEvent {
         user_id: UserId,
         online: bool,
     },
+    /// Who is in a channel's call now. Sent to everyone who can read the channel when it
+    /// changes, and after [`ServerEvent::Ready`] for every call going on. No participants means
+    /// the call ended.
+    CallChanged {
+        channel_id: ChannelId,
+        participants: Vec<CallParticipant>,
+    },
+    /// This connection is no longer in the call: the person joined from another device, lost
+    /// access to the channel, or the call was full.
+    CallLeft {
+        channel_id: ChannelId,
+        reason: CallLeftReason,
+    },
     Pong,
+}
+
+/// Someone in a call.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallParticipant {
+    pub user_id: UserId,
+    pub audio: bool,
+    pub video: bool,
+    pub joined_at: Timestamp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallLeftReason {
+    /// The person joined the call from another device.
+    OtherDevice,
+    /// The call has as many people as the server allows.
+    Full,
+    /// The person can no longer take part in the channel.
+    NoAccess,
+}
+
+/// Binary WebSocket frames carry a call's audio and video, end-to-end encrypted by the clients.
+///
+/// Up, a client sends `[version][kind][channel id: i64 BE][payload]`; down, the server relays
+/// `[version][kind][channel id: i64 BE][sender user id: i64 BE][payload]` to the other people in
+/// the call. The server reads only the header and never the payload.
+pub mod media {
+    use agora_core::{ChannelId, UserId};
+
+    /// The frame layout version.
+    pub const VERSION: u8 = 1;
+    /// The largest payload a frame may carry.
+    pub const MAX_PAYLOAD: usize = 60 * 1024;
+    const UP_HEADER: usize = 10;
+    const DOWN_HEADER: usize = 18;
+    /// The largest binary frame either side sends.
+    pub const MAX_FRAME: usize = MAX_PAYLOAD + DOWN_HEADER;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum Kind {
+        Audio,
+        Video,
+    }
+
+    impl Kind {
+        fn byte(self) -> u8 {
+            match self {
+                Kind::Audio => 1,
+                Kind::Video => 2,
+            }
+        }
+
+        fn from_byte(b: u8) -> Option<Kind> {
+            match b {
+                1 => Some(Kind::Audio),
+                2 => Some(Kind::Video),
+                _ => None,
+            }
+        }
+    }
+
+    /// A frame a client sends.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Up<'a> {
+        pub kind: Kind,
+        pub channel: ChannelId,
+        pub payload: &'a [u8],
+    }
+
+    /// A frame the server relays.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Down<'a> {
+        pub kind: Kind,
+        pub channel: ChannelId,
+        pub sender: UserId,
+        pub payload: &'a [u8],
+    }
+
+    fn i64_at(bytes: &[u8], at: usize) -> Option<i64> {
+        let raw: [u8; 8] = bytes.get(at..at.checked_add(8)?)?.try_into().ok()?;
+        Some(i64::from_be_bytes(raw))
+    }
+
+    impl Up<'_> {
+        pub fn encode(&self) -> Vec<u8> {
+            let mut out = Vec::with_capacity(UP_HEADER + self.payload.len());
+            out.push(VERSION);
+            out.push(self.kind.byte());
+            out.extend_from_slice(&self.channel.0.to_be_bytes());
+            out.extend_from_slice(self.payload);
+            out
+        }
+
+        /// `None` for a frame of another version, an unknown kind, or a payload too large.
+        pub fn parse(bytes: &[u8]) -> Option<Up<'_>> {
+            if *bytes.first()? != VERSION {
+                return None;
+            }
+            let kind = Kind::from_byte(*bytes.get(1)?)?;
+            let channel = ChannelId(i64_at(bytes, 2)?);
+            let payload = bytes.get(UP_HEADER..)?;
+            (payload.len() <= MAX_PAYLOAD).then_some(Up {
+                kind,
+                channel,
+                payload,
+            })
+        }
+
+        /// The frame the server relays for it.
+        pub fn relay(&self, sender: UserId) -> Vec<u8> {
+            Down {
+                kind: self.kind,
+                channel: self.channel,
+                sender,
+                payload: self.payload,
+            }
+            .encode()
+        }
+    }
+
+    impl Down<'_> {
+        pub fn encode(&self) -> Vec<u8> {
+            let mut out = Vec::with_capacity(DOWN_HEADER + self.payload.len());
+            out.push(VERSION);
+            out.push(self.kind.byte());
+            out.extend_from_slice(&self.channel.0.to_be_bytes());
+            out.extend_from_slice(&self.sender.0.to_be_bytes());
+            out.extend_from_slice(self.payload);
+            out
+        }
+
+        pub fn parse(bytes: &[u8]) -> Option<Down<'_>> {
+            if *bytes.first()? != VERSION {
+                return None;
+            }
+            let kind = Kind::from_byte(*bytes.get(1)?)?;
+            let channel = ChannelId(i64_at(bytes, 2)?);
+            let sender = UserId(i64_at(bytes, 10)?);
+            let payload = bytes.get(DOWN_HEADER..)?;
+            (payload.len() <= MAX_PAYLOAD).then_some(Down {
+                kind,
+                channel,
+                sender,
+                payload,
+            })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn frames_round_trip_and_hostile_bytes_are_refused() {
+            let up = Up {
+                kind: Kind::Video,
+                channel: ChannelId(42),
+                payload: b"sealed",
+            };
+            let bytes = up.encode();
+            assert_eq!(Up::parse(&bytes), Some(up));
+            let relayed = up.relay(UserId(7));
+            let down = Down::parse(&relayed).unwrap();
+            assert_eq!(down.sender, UserId(7));
+            assert_eq!(down.payload, b"sealed");
+            assert_eq!(down.kind, Kind::Video);
+
+            for bad in [
+                &b""[..],
+                &[1],
+                &[2, 1, 0, 0, 0, 0, 0, 0, 0, 1],
+                &[1, 9, 0, 0, 0, 0, 0, 0, 0, 1],
+            ] {
+                assert_eq!(Up::parse(bad), None);
+            }
+            assert_eq!(Up::parse(&bytes[..9]), None);
+            assert_eq!(Down::parse(&relayed[..17]), None);
+            let mut big = Up { payload: &[], ..up }.encode();
+            big.resize(10 + MAX_PAYLOAD + 1, 0);
+            assert_eq!(Up::parse(&big), None);
+        }
+    }
 }
 
 #[cfg(test)]

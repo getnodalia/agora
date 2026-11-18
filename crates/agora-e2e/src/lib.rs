@@ -53,6 +53,8 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub mod call;
+
 fn mls<E: std::fmt::Debug>(e: E) -> Error {
     Error::Mls(format!("{e:?}"))
 }
@@ -415,6 +417,29 @@ impl Device {
             Ok(Some(g)) if g.is_active() => Some(g.epoch().as_u64()),
             _ => None,
         }
+    }
+
+    /// The key that seals this conversation's call at the group's current epoch: an MLS
+    /// exported secret (RFC 9420 §8.5), so only the conversation's devices can derive it and a
+    /// device removed from it cannot follow the next epoch's calls.
+    pub fn call_key(&self, channel: ChannelId) -> Result<call::CallKey> {
+        let group = self.group(channel)?;
+        if !group.is_active() {
+            return Err(Error::NoGroup);
+        }
+        let secret = group
+            .export_secret(
+                self.provider.crypto(),
+                call::EXPORTER_LABEL,
+                &channel.0.to_be_bytes(),
+                32,
+            )
+            .map_err(mls)?;
+        let key: [u8; 32] = secret.try_into().map_err(|_| Error::Malformed)?;
+        Ok(call::CallKey {
+            epoch: group.epoch().as_u64(),
+            key,
+        })
     }
 
     /// The last log entry processed for `channel`.

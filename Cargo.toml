@@ -40,6 +40,7 @@ tower-http = { version = "0.6", features = ["limit", "trace", "set-header"] }
 argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
+aes-gcm = "0.10"
 base64 = "0.22"
 toml = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

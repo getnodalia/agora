@@ -33,6 +33,9 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 
 ## Next: usable by a small team
 
+- Voice and video calls in the desktop app (microphone, camera, speaker). The server side and the
+  encryption are in place: who is in a call, end-to-end sealed audio and video, and their limits.
+
 - A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
 - A container image for the server, and server packages for ARM (Raspberry Pi).
 - Native notifications on macOS and Windows, and unread indicators on the app icon. Linux has an
@@ -46,7 +49,6 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 - PostgreSQL as a second storage backend (the storage crate keeps SQL in one place for this).
 - A web client from the same Rust code (WebAssembly), and mobile apps.
 - Single sign-on, and a server-wide requirement for two-step verification.
-- Voice and video calls.
 - Verified identities for end-to-end encryption (cross-signed devices, a safety number per
   person), so a server cannot add a device unnoticed; reading old messages on a new device by
   handing keys over from another of one's own devices; reactions encrypted too.

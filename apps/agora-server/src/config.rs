@@ -105,6 +105,10 @@ pub struct Limits {
     /// Largest file people can share in a conversation, in bytes (encrypted size). At most
     /// [`FILE_HARD_MAX_BYTES`].
     pub max_file_bytes: usize,
+    /// People in one call.
+    pub call_participants: usize,
+    /// Audio and video one connection may send into a call, in bytes per second.
+    pub call_bytes_per_second: usize,
 }
 
 /// The largest file upload the server accepts whatever the configuration says.
@@ -119,6 +123,8 @@ impl Default for Limits {
             connections_per_user: 16,
             max_body_bytes: 1024 * 1024,
             max_file_bytes: 100 * 1024 * 1024,
+            call_participants: 12,
+            call_bytes_per_second: 1024 * 1024,
         }
     }
 }
