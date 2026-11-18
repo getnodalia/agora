@@ -69,6 +69,11 @@ pub enum Dialog {
     ConfirmDelete {
         id: MessageId,
     },
+    /// Share the newest messages of a conversation again, for people who joined after them.
+    ShareHistory {
+        channel: ChannelId,
+        count: usize,
+    },
     Organizations(OrganizationDialog),
     Security(crate::security::SecurityDialog),
     Preferences,
@@ -96,6 +101,7 @@ impl Dialog {
             Dialog::Topic { .. } => tr("Topic"),
             Dialog::Edit { .. } => tr("Edit message"),
             Dialog::ConfirmDelete { .. } => tr("Delete this message?"),
+            Dialog::ShareHistory { .. } => tr("Share earlier messages"),
             Dialog::Organizations(_) => tr("Organizations"),
             Dialog::Security(_) => tr("Security and devices"),
             Dialog::Preferences => tr("Preferences"),
@@ -628,6 +634,23 @@ fn body(
                 actions.push(Action::Delete(*id));
             }
             *close |= cancel;
+        }
+        Dialog::ShareHistory { channel, count } => {
+            ui.label(
+                RichText::new(tr("Messages are encrypted for the people in a conversation when they are sent, so someone who joins later cannot read what came before. This sends a copy of the newest messages to everyone in it now."))
+                    .color(color(p.text_secondary)),
+            );
+            label(ui, look, tr("How many messages"));
+            ui.horizontal(|ui| {
+                for n in [25, 50, 100] {
+                    ui.selectable_value(count, n, n.to_string());
+                }
+            });
+            let (confirm, cancel) = buttons(ui, look, tr("Share"), true);
+            if confirm {
+                actions.push(Action::ShareHistory(*channel, *count));
+            }
+            *close |= cancel || confirm;
         }
         Dialog::Preferences => preferences(ui, settings, look, actions),
         Dialog::About => about(ui, look),

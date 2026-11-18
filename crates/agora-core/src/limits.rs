@@ -24,3 +24,5 @@ pub const NONCE_MAX: usize = 64;
 pub const WORKSPACE_MEMBERS_MAX: u32 = 10_000;
 /// Largest search query, in characters.
 pub const SEARCH_QUERY_MAX: usize = 200;
+/// The largest file anyone can share, in bytes before encryption; a server may allow less.
+pub const FILE_MAX_BYTES: u64 = 512 * 1024 * 1024;

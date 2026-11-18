@@ -17,6 +17,8 @@ pub struct Pending {
     pub nonce: String,
     pub body: String,
     pub failed: bool,
+    /// A file on this computer the message sends; `body` then names it.
+    pub file: Option<std::path::PathBuf>,
 }
 
 /// The loaded part of a channel's top-level history, oldest first.
@@ -768,6 +770,7 @@ mod tests {
             nonce: "n1".into(),
             body: "qué tal".into(),
             failed: false,
+            file: None,
         });
         let mut mine = message(7, 10, &ana, "qué tal");
         mine.client_nonce = Some("n1".into());

@@ -50,6 +50,14 @@ pub enum Reply {
         nonce: String,
         result: Result<Message>,
     },
+    /// Files picked to send; empty when the person cancelled.
+    FilesPicked {
+        channel: ChannelId,
+        thread: Option<MessageId>,
+        paths: Vec<std::path::PathBuf>,
+    },
+    /// A file was saved (`Ok(true)`), or the person cancelled (`Ok(false)`).
+    FileSaved(String, Result<bool>),
     Thread(Result<Thread>),
     Reacted(MessageId, Result<Vec<Reaction>>),
     Edited(Result<Message>),
