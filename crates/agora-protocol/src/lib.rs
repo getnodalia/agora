@@ -265,6 +265,57 @@ pub struct GitHubEvent {
     pub received_at: Timestamp,
 }
 
+/// What sends notices through an integration. Both are incoming webhooks; the kind names the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationKind {
+    /// Hito, Nodalia's tasks and milestones app.
+    Hito,
+    /// Any app or script that can send a signed HTTP request.
+    Webhook,
+}
+
+/// An incoming webhook that posts notices to a channel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Integration {
+    pub id: i64,
+    pub channel_id: ChannelId,
+    pub kind: IntegrationKind,
+    pub name: String,
+    pub created_by: UserId,
+    pub created_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateIntegrationRequest {
+    pub kind: IntegrationKind,
+    pub name: String,
+}
+
+/// A new integration, with what the other app needs. The secret is shown this once.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatedIntegration {
+    pub integration: Integration,
+    /// Where the other app sends requests, from the server's root (`/api/v1/hooks/7`).
+    pub path: String,
+    /// The key that signs each request body (HMAC-SHA256, keyed with this text as it is).
+    pub secret: String,
+}
+
+/// A notice an integration posted to a channel. It is not end-to-end encrypted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrationNotice {
+    pub id: i64,
+    pub integration_id: i64,
+    pub channel_id: ChannelId,
+    pub integration_name: String,
+    pub kind: IntegrationKind,
+    pub title: Option<String>,
+    pub text: String,
+    pub url: Option<String>,
+    pub created_at: Timestamp,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: WorkspaceId,
@@ -704,6 +755,10 @@ pub enum ServerEvent {
     ReadMarker {
         channel_id: ChannelId,
         message_id: MessageId,
+    },
+    /// An integration posted a notice to a channel the caller can read.
+    IntegrationNotice {
+        notice: IntegrationNotice,
     },
     /// A member of a conversation the caller can read received or read more of it.
     Receipt {

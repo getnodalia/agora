@@ -44,6 +44,10 @@ Authenticated requests carry `Authorization: Bearer <token>`. Errors are
 | `PATCH /messages/{id}`, `DELETE …` | Edit (author, `{ciphertext, mentions}`) or delete (author or moderator) |
 | `GET /messages/{id}/thread` | A root message and its replies |
 | `POST /messages/{id}/reactions` | `{emoji}`: toggle the caller's reaction |
+| `GET /channels/{id}/integrations`, `POST …` | The apps that post to a channel; add one (`{kind, name}`, admins) → `{integration, path, secret}`, the secret shown once |
+| `DELETE /integrations/{id}` | Remove one (admins) |
+| `GET /channels/{id}/notices` | The newest 50 notices integrations posted, oldest first |
+| `POST /hooks/{id}` | No session: a notice from another app, signed with the integration's key (see [integrations.md](integrations.md)) |
 
 ### End-to-end encryption
 
@@ -76,7 +80,7 @@ Client frames: `auth {token}` (first, within 10 s), `typing {channel_id, thread_
 
 Server events: `ready {user}`, `error {code, message}`, `message_created`, `message_updated`,
 `message_deleted`, `reactions_changed`, `channel_changed`, `channel_removed`, `member_joined`,
-`read_marker`, `receipt` (a member received or read more of a conversation), `typing`, `presence`, `mls_changed` (a conversation's group moved: catch up), `pong`.
+`read_marker`, `receipt` (a member received or read more of a conversation), `integration_notice`, `typing`, `presence`, `mls_changed` (a conversation's group moved: catch up), `pong`.
 
 Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last

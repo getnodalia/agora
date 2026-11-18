@@ -76,6 +76,7 @@ pub enum Dialog {
     },
     Organizations(OrganizationDialog),
     Security(crate::security::SecurityDialog),
+    Integrations(crate::integrations::IntegrationsDialog),
     Preferences,
     About,
     Shortcuts,
@@ -104,6 +105,7 @@ impl Dialog {
             Dialog::ShareHistory { .. } => tr("Share earlier messages"),
             Dialog::Organizations(_) => tr("Organizations"),
             Dialog::Security(_) => tr("Security and devices"),
+            Dialog::Integrations(_) => tr("Integrations"),
             Dialog::Preferences => tr("Preferences"),
             Dialog::About => tr("About Ágora"),
             Dialog::Shortcuts => tr("Keyboard shortcuts"),
@@ -148,7 +150,10 @@ pub fn show(
                 });
             });
             ui.add_space(12.0);
-            if matches!(dialog, Dialog::Organizations(_) | Dialog::Security(_)) {
+            if matches!(
+                dialog,
+                Dialog::Organizations(_) | Dialog::Security(_) | Dialog::Integrations(_)
+            ) {
                 let max_height = (ctx.content_rect().height() - 140.0).max(120.0);
                 egui::ScrollArea::vertical()
                     .id_salt("organization-dialog-body")
@@ -303,6 +308,7 @@ fn body(
             }
         }
         Dialog::Security(state) => crate::security::show(ui, look, state, actions),
+        Dialog::Integrations(state) => crate::integrations::show(ui, look, state, actions),
         Dialog::Organizations(state) => {
             ui.label(tr("Companies contain separate workspaces. Membership alone does not grant access to every workspace."));
             if state.pending {

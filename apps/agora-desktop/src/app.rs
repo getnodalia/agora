@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use agora_client::{Client, ClientError, Realtime, RealtimeEvent, Secure};
-use agora_core::{ChannelId, MessageId, OrganizationId, Role, UserId, WorkspaceId};
+use agora_core::{ChannelId, ChannelKind, MessageId, OrganizationId, Role, UserId, WorkspaceId};
 use agora_protocol::{
     ClientFrame, CreateChannelRequest, CreateInviteRequest, Invite, Message, RegisterRequest,
     ServerEvent, ServerInfo, SessionResponse,
@@ -93,6 +93,10 @@ pub enum Action {
     OpenOrganizations,
     /// Open the security dialog (with `Load`) or act inside it.
     Security(crate::security::SecurityAction),
+    /// Open the integrations of a channel.
+    OpenIntegrations(ChannelId),
+    /// Act inside the integrations dialog.
+    Integrations(crate::integrations::IntegrationsAction),
     SelectOrganization(OrganizationId),
     CreateOrganization(String),
     CreateOrganizationWorkspace(OrganizationId, String),
@@ -273,6 +277,12 @@ impl App {
                 tr("Share earlier messages"),
                 free && channel.is_some(),
             ),
+            item(
+                "conversation.integrations",
+                &conversation,
+                tr("Integrations"),
+                free && channel.is_some(),
+            ),
             item("view.search", &view, tr("Search messages"), signed_in),
             item(
                 "view.panel",
@@ -336,6 +346,7 @@ impl App {
                 channel: channel?,
                 count: 50,
             }),
+            "conversation.integrations" => Action::OpenIntegrations(channel?),
             "view.search" => Action::FocusSearch,
             "view.panel" => Action::TogglePanel,
             _ => return None,
@@ -805,6 +816,18 @@ impl Main {
             }
             Reply::Members(ws, result) => self.model.set_members(ws, result?),
             Reply::Receipts(channel, result) => self.model.set_receipts(channel, result?),
+            Reply::Notices(channel, result) => self.model.set_notices(channel, result?),
+            Reply::Integrations(reply) => {
+                if let Some(dialogs::Dialog::Integrations(d)) = &mut self.dialog {
+                    if d.answer(reply) {
+                        d.act(
+                            net,
+                            &self.client,
+                            crate::integrations::IntegrationsAction::Load,
+                        );
+                    }
+                }
+            }
             Reply::Security(reply) => {
                 if let Some(dialogs::Dialog::Security(d)) = &mut self.dialog {
                     if d.answer(reply) {
@@ -1128,6 +1151,8 @@ impl Main {
             net.run(async move { net::devices(&secure, id).await });
             let client = self.client.clone();
             net.run(async move { Reply::Receipts(id, client.receipts(id).await) });
+            let client = self.client.clone();
+            net.run(async move { Reply::Notices(id, client.notices(id).await) });
         }
         if let Some(ws) = self.model.workspace {
             if !self.model.members.contains_key(&ws) {
@@ -1355,6 +1380,28 @@ impl Main {
                     self.dialog = Some(dialogs::Dialog::Security(Default::default()));
                 }
                 if let Some(dialogs::Dialog::Security(d)) = &mut self.dialog {
+                    d.act(net, &self.client, action);
+                }
+            }
+            Action::OpenIntegrations(channel) => {
+                let admin = self
+                    .model
+                    .channel_info(channel)
+                    .is_some_and(|c| c.kind != ChannelKind::Direct)
+                    && self
+                        .model
+                        .current_workspace()
+                        .is_some_and(|w| w.role.is_admin());
+                let mut dialog = crate::integrations::IntegrationsDialog::new(channel, admin);
+                dialog.act(
+                    net,
+                    &self.client,
+                    crate::integrations::IntegrationsAction::Load,
+                );
+                self.dialog = Some(dialogs::Dialog::Integrations(dialog));
+            }
+            Action::Integrations(action) => {
+                if let Some(dialogs::Dialog::Integrations(d)) = &mut self.dialog {
                     d.act(net, &self.client, action);
                 }
             }

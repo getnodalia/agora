@@ -32,6 +32,8 @@ pub enum Reply {
     Members(WorkspaceId, Result<Vec<Member>>),
     Organizations(u64, Result<Vec<Organization>>),
     Security(crate::security::SecurityReply),
+    Integrations(crate::integrations::IntegrationsReply),
+    Notices(ChannelId, Result<Vec<agora_protocol::IntegrationNotice>>),
     Receipts(ChannelId, Result<Vec<agora_protocol::Receipt>>),
     OrganizationDetails(u64, OrganizationId, Result<(Vec<Workspace>, Vec<Member>)>),
     OrganizationCreated(u64, Result<Organization>),

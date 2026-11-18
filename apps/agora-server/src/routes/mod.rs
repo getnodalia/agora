@@ -6,6 +6,7 @@ pub mod channels;
 pub mod e2e;
 pub mod files;
 pub mod github;
+pub mod integrations;
 pub mod messages;
 pub mod mfa;
 pub mod organizations;
@@ -18,7 +19,7 @@ use agora_core::{roles, ChannelId, Role, UserId, WorkspaceId};
 use agora_storage::ChannelRow;
 use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderMap;
-use axum::routing::{get, patch, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 
 use crate::error::{AppError, AppResult};
@@ -30,6 +31,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/integrations/github/webhook",
             post(github::receive).layer(DefaultBodyLimit::max(1024 * 1024)),
+        )
+        .route(
+            "/hooks/{id}",
+            post(integrations::receive).layer(DefaultBodyLimit::max(integrations::BODY_MAX)),
         )
         .route("/auth/register", post(accounts::register))
         .route("/auth/login", post(accounts::login))
@@ -102,6 +107,12 @@ pub fn router() -> Router<AppState> {
         )
         .route("/files/{id}", get(files::download))
         .route("/channels/{id}/receipts", get(channels::receipts))
+        .route(
+            "/channels/{id}/integrations",
+            get(integrations::list).post(integrations::create),
+        )
+        .route("/integrations/{id}", delete(integrations::delete))
+        .route("/channels/{id}/notices", get(integrations::notices))
         .route("/channels/{id}/mls", get(e2e::state))
         .route("/channels/{id}/mls/group", post(e2e::create_group))
         .route("/channels/{id}/mls/commit", post(e2e::commit))

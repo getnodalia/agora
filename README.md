@@ -66,6 +66,9 @@ stores only ciphertext.
     <td colspan="2"><img src="docs/screenshots/files-and-shared-history.png" alt="Someone who joined later reads earlier messages a member shared, and saves an encrypted file"><br><sub><b>Files and shared history</b>: files travel encrypted, and a member can share earlier messages with someone who joined later.</sub></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/screenshots/integrations.png" alt="Notices from a Hito project between the messages of a channel, marked as not end-to-end encrypted"><br><sub><b>Integrations</b>: a Hito project posts its milestones and finished tasks to the team's channel.</sub></td>
+  </tr>
+  <tr>
     <td colspan="2"><img src="docs/screenshots/new-device.png" alt="A laptop signed in later: what was said before it joined stays encrypted, what follows it reads"><br><sub><b>A new device</b>: what was said before it joined stays encrypted, what follows it reads.</sub></td>
   </tr>
 </table>
@@ -90,6 +93,8 @@ stores only ciphertext.
 - **Earlier messages for newcomers**: someone who joins later cannot read what came before, so a
   member can choose to share the newest messages with everyone in the conversation now.
 - **Sent, delivered and read** ticks on your messages, with who has read them.
+- **Integrations**: a Hito project, a build server or any script can post notices to a channel
+  through a signed address an admin adds. Notices are readable by the server and say so.
 - **Two-step verification** with an authenticator app and recovery codes, and the devices signed
   in to your account, which stay the same device when you sign out and back in.
 - **Real time** over an authenticated WebSocket: new messages, edits, reactions, typing, presence,
