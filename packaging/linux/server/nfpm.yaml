@@ -45,6 +45,12 @@ contents:
   - src: @SERVER@/agora-server.service
     dst: /usr/lib/systemd/system/agora-server.service
     file_info: { mode: 0644 }
+  - src: @SERVER@/agora-server-update.service
+    dst: /usr/lib/systemd/system/agora-server-update.service
+    file_info: { mode: 0644 }
+  - src: @SERVER@/agora-server-update.timer
+    dst: /usr/lib/systemd/system/agora-server-update.timer
+    file_info: { mode: 0644 }
   - src: @SERVER@/agora.toml
     dst: /etc/agora/agora.toml
     type: config|noreplace

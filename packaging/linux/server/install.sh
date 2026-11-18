@@ -12,6 +12,8 @@ set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 bin=/usr/local/bin/agora-server
 unit=/etc/systemd/system/agora-server.service
+update_unit=/etc/systemd/system/agora-server-update.service
+update_timer=/etc/systemd/system/agora-server-update.timer
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run it as root: sudo $0 $*" >&2
@@ -21,8 +23,11 @@ systemd=0
 [ -d /run/systemd/system ] && systemd=1
 
 if [ "${1:-}" = "--uninstall" ]; then
-  if [ "$systemd" = 1 ]; then systemctl disable --now agora-server.service 2>/dev/null || true; fi
-  rm -f "$bin" "$unit"
+  if [ "$systemd" = 1 ]; then
+    systemctl disable --now agora-server-update.timer 2>/dev/null || true
+    systemctl disable --now agora-server.service 2>/dev/null || true
+  fi
+  rm -f "$bin" "$bin.previous" "$unit" "$update_unit" "$update_timer"
   if [ "$systemd" = 1 ]; then systemctl daemon-reload; fi
   echo "Removed the Ágora server. Data in /var/lib/agora and /etc/agora/agora.toml were kept."
   exit 0
@@ -61,12 +66,21 @@ install -d -m 755 "$(dirname "$unit")"
 sed "s|/usr/bin/agora-server|$bin|" "$here/agora-server.service" >"$unit.new"
 chmod 644 "$unit.new"
 mv -f "$unit.new" "$unit"
+sed "s|/usr/bin/agora-server|$bin|" "$here/agora-server-update.service" >"$update_unit.new"
+chmod 644 "$update_unit.new"
+mv -f "$update_unit.new" "$update_unit"
+install -m 644 "$here/agora-server-update.timer" "$update_timer"
 
 version="$("$bin" --version)"
 if [ "$systemd" = 1 ]; then
   systemctl daemon-reload
   systemctl enable agora-server.service >/dev/null 2>&1
   systemctl restart agora-server.service
+  # The daily self-update timer, enabled once: a timer someone disabled stays disabled.
+  if [ ! -e /var/lib/agora/.update-timer-enabled ]; then
+    systemctl enable --now agora-server-update.timer >/dev/null 2>&1 || true
+    touch /var/lib/agora/.update-timer-enabled
+  fi
   echo "Installed $version and started the agora-server service."
   echo "Check it:  curl http://127.0.0.1:7878/healthz   (answers ok)"
   echo "Logs:      journalctl -u agora-server -f"

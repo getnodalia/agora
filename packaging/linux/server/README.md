@@ -68,5 +68,7 @@ invitation from a workspace owner.
 | --- | --- |
 | Logs | `journalctl -u agora-server -f` |
 | Restart after a configuration change | `sudo systemctl restart agora-server` |
-| Upgrade | unpack the new release and run `sudo ./install.sh` again (migrations run on start) |
+| Upgrade | automatic: `agora-server-update.timer` installs each new release once a day, after a database backup (`journalctl -u agora-server-update`) |
+| Upgrade now | `sudo agora-server --config /etc/agora/agora.toml self-update` |
+| Turn automatic upgrades off | `automatic = false` under `[updates]` in `/etc/agora/agora.toml` |
 | Everything else | https://github.com/getnodalia/agora/blob/main/docs/deployment.md |

@@ -28,6 +28,23 @@ pub struct Config {
     /// tokens would cross the network in clear text: only for an isolated lab network.
     pub allow_insecure_public_bind: bool,
     pub limits: Limits,
+    pub updates: Updates,
+}
+
+/// Self-updates: `agora-server self-update --auto`, which the `agora-server-update.timer`
+/// systemd timer runs once a day.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Updates {
+    /// Install new stable releases automatically. `false` makes the timer do nothing; a manual
+    /// `agora-server self-update` still works.
+    pub automatic: bool,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Self { automatic: true }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -87,6 +104,7 @@ impl Default for Config {
             trust_proxy: false,
             allow_insecure_public_bind: false,
             limits: Limits::default(),
+            updates: Updates::default(),
         }
     }
 }
