@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 
 use agora_core::{ChannelId, ChannelKind, MessageId, UserId, WorkspaceId};
 use agora_protocol::{
-    Channel, Member, Message, MessagePage, Reaction, Receipt, ServerEvent, Thread, User, Workspace,
+    Channel, IntegrationNotice, Member, Message, MessagePage, Reaction, Receipt, ServerEvent,
+    Thread, User, Workspace,
 };
 
 /// A message this client sent that the server has not confirmed yet.
@@ -121,6 +122,17 @@ pub struct Status {
 
 pub const TYPING_SECONDS: f64 = 6.0;
 
+/// Add a notice once, keeping the list in time order and at most [`NOTICES_KEPT`] long.
+fn add_notice(list: &mut Vec<IntegrationNotice>, notice: IntegrationNotice) {
+    if list.iter().any(|n| n.id == notice.id) {
+        return;
+    }
+    list.push(notice);
+    list.sort_by_key(|n| (n.created_at, n.id));
+    let extra = list.len().saturating_sub(NOTICES_KEPT);
+    list.drain(..extra);
+}
+
 #[derive(Debug)]
 pub struct Model {
     pub me: User,
@@ -144,7 +156,12 @@ pub struct Model {
     pub receipts: HashMap<ChannelId, HashMap<UserId, Receipt>>,
     /// The newest message this device already told the server it received, per channel.
     pub delivered: HashMap<ChannelId, MessageId>,
+    /// What connected apps posted in each conversation, oldest first. Not end-to-end encrypted.
+    pub notices: HashMap<ChannelId, Vec<IntegrationNotice>>,
 }
+
+/// The most notices kept per conversation.
+pub const NOTICES_KEPT: usize = 50;
 
 impl Model {
     pub fn new(me: User) -> Model {
@@ -165,6 +182,16 @@ impl Model {
             devices: HashMap::new(),
             receipts: HashMap::new(),
             delivered: HashMap::new(),
+            notices: HashMap::new(),
+        }
+    }
+
+    /// Replace what is known of a conversation's notices.
+    pub fn set_notices(&mut self, channel: ChannelId, notices: Vec<IntegrationNotice>) {
+        let list = self.notices.entry(channel).or_default();
+        list.clear();
+        for notice in notices {
+            add_notice(list, notice);
         }
     }
 
@@ -523,6 +550,9 @@ impl Model {
                 let slot = all.entry(receipt.user_id).or_insert(receipt);
                 slot.delivered_id = slot.delivered_id.max(receipt.delivered_id);
                 slot.read_id = slot.read_id.max(receipt.read_id);
+            }
+            ServerEvent::IntegrationNotice { notice } => {
+                add_notice(self.notices.entry(notice.channel_id).or_default(), notice);
             }
             ServerEvent::Typing {
                 channel_id,

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use agora_core::{ChannelId, ChannelKind, MessageId, UserId};
-use agora_protocol::{Channel, Message, Reaction, Timestamp};
+use agora_protocol::{Channel, IntegrationNotice, Message, Reaction, Timestamp};
 use egui::{
     pos2, vec2, Align, Color32, CornerRadius, Id, Key, Layout, Margin, Modifiers, Rect, RichText,
     Sense, Stroke, TextEdit, Ui, UiBuilder,
@@ -799,6 +799,23 @@ fn history(
     let has_more = conv.has_more;
     let loading = conv.loading;
     let first_unread = conv.first_unread;
+    // Notices from before the oldest loaded message wait until older messages load.
+    let since = if has_more {
+        messages.first().map_or(Timestamp::MAX, |m| m.created_at)
+    } else {
+        Timestamp::MIN
+    };
+    let notices: Vec<IntegrationNotice> = main
+        .model
+        .notices
+        .get(&channel.id)
+        .map(|all| {
+            all.iter()
+                .filter(|n| n.created_at >= since)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
     let pending: Vec<Pending> = main
         .model
         .pending
@@ -845,30 +862,55 @@ fn history(
                     });
                 }
             }
-            message_list(ui, main, look, &messages, first_unread, true, actions);
+            let feed = Feed {
+                messages: &messages,
+                notices: &notices,
+                first_unread,
+            };
+            message_list(ui, main, look, feed, true, actions);
             pending_list(ui, look, &main.model, &pending, actions);
             ui.add_space(8.0);
         });
+}
+
+/// What a conversation shows, in time order once drawn.
+#[derive(Clone, Copy)]
+struct Feed<'a> {
+    messages: &'a [Message],
+    /// Notices from integrations, drawn between the messages by time.
+    notices: &'a [IntegrationNotice],
+    first_unread: Option<MessageId>,
 }
 
 fn message_list(
     ui: &mut Ui,
     main: &mut Main,
     look: &Look,
-    messages: &[Message],
-    first_unread: Option<MessageId>,
+    feed: Feed<'_>,
     threads: bool,
     actions: &mut Vec<Action>,
 ) {
+    let Feed {
+        messages,
+        notices,
+        first_unread,
+    } = feed;
     let mut previous: Option<&Message> = None;
-    for message in messages {
-        if let Some(prev) = previous {
-            if day(prev.created_at) != day(message.created_at) {
-                day_separator(ui, look, message.created_at);
-            }
-        } else {
-            day_separator(ui, look, message.created_at);
+    let mut last_day: Option<Option<chrono::NaiveDate>> = None;
+    let mut notices = notices.iter().peekable();
+    let mut separate = |ui: &mut Ui, at: Timestamp| {
+        if last_day != Some(day(at)) {
+            day_separator(ui, look, at);
+            last_day = Some(day(at));
         }
+    };
+    for message in messages {
+        while let Some(notice) = notices.next_if(|n| n.created_at < message.created_at) {
+            separate(ui, notice.created_at);
+            notice_item(ui, look, notice);
+            previous = None;
+        }
+        separate(ui, message.created_at);
         let unread_line = first_unread == Some(message.id);
         if unread_line {
             new_messages_line(ui, look);
@@ -884,6 +926,72 @@ fn message_list(
         message_item(ui, main, look, message, grouped, threads, actions);
         previous = Some(message);
     }
+    for notice in notices {
+        separate(ui, notice.created_at);
+        notice_item(ui, look, notice);
+    }
+}
+
+/// A notice another app posted: its name, a link mark, and that the server can read it.
+fn notice_item(ui: &mut Ui, look: &Look, notice: &IntegrationNotice) {
+    let p = &look.palette;
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+        ui.painter()
+            .rect_filled(rect, 10.0, color(p.surface_sunken));
+        if let Some(i) = nodalia_theme::icons::get("link") {
+            nodalia_theme::icons::paint(
+                ui.painter(),
+                rect.shrink(9.0),
+                i,
+                nodalia_theme::icons::Style::bold(color(p.text_secondary)),
+            );
+        }
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+            ui.set_max_width(ui.available_width() - 16.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(&notice.integration_name)
+                        .strong()
+                        .color(color(p.text_primary)),
+                );
+                ui.label(
+                    RichText::new(crate::integrations::kind_label(notice.kind))
+                        .size(font_size::CAPTION)
+                        .color(color(p.text_secondary)),
+                );
+                ui.label(
+                    RichText::new(clock(notice.created_at))
+                        .size(font_size::CAPTION)
+                        .color(color(p.text_tertiary)),
+                );
+            });
+            cr::island(look)
+                .inner_margin(10)
+                .stroke(Stroke::new(1.0, color(p.border_subtle)))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width().min(560.0));
+                    if let Some(title) = &notice.title {
+                        ui.label(RichText::new(title).strong().color(color(p.text_primary)));
+                    }
+                    ui.label(RichText::new(&notice.text).color(color(p.text_primary)));
+                    if let Some(url) = &notice.url {
+                        ui.hyperlink_to(tr("Open"), url);
+                    }
+                    ui.horizontal(|ui| {
+                        icon(ui, "lock", 12.0, color(p.text_tertiary));
+                        ui.label(
+                            RichText::new(tr("Not end-to-end encrypted"))
+                                .size(font_size::CAPTION)
+                                .color(color(p.text_tertiary)),
+                        );
+                    });
+                });
+        });
+    });
 }
 
 /// Keep the text column fixed even when a consecutive message has no avatar.
@@ -1564,7 +1672,12 @@ fn thread_panel(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &m
                     if !thread.loaded {
                         ui.spinner();
                     }
-                    message_list(ui, main, look, &thread.replies, None, false, actions);
+                    let feed = Feed {
+                        messages: &thread.replies,
+                        notices: &[],
+                        first_unread: None,
+                    };
+                    message_list(ui, main, look, feed, false, actions);
                     pending_list(ui, look, &main.model, &pending, actions);
                 });
         });
@@ -1702,7 +1815,7 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                                 RichText::new(date(c.created_at)).color(color(p.text_primary)),
                             );
                             ui.add_space(10.0);
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 if ws.as_ref().is_some_and(|w| w.role.can_invite())
                                     && cr::secondary_button(ui, look, tr("Invite people"), true)
                                         .clicked()
@@ -1726,6 +1839,13 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                                         channel: c.id,
                                         count: 50,
                                     }));
+                                }
+                                if c.joined
+                                    && c.kind != ChannelKind::Direct
+                                    && cr::secondary_button(ui, look, tr("Integrations"), true)
+                                        .clicked()
+                                {
+                                    actions.push(Action::OpenIntegrations(c.id));
                                 }
                                 if c.joined
                                     && cr::secondary_button(ui, look, tr("Leave channel"), true)

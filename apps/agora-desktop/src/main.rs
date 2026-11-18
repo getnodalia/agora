@@ -19,6 +19,7 @@ mod chrome;
 mod dialogs;
 mod i18n;
 mod icon;
+mod integrations;
 #[cfg(target_os = "linux")]
 mod linux_menu;
 mod model;

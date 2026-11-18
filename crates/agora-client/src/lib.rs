@@ -498,6 +498,44 @@ impl Client {
         self.get(&format!("/channels/{id}/receipts")).await
     }
 
+    // Integrations ----------------------------------------------------------------------------
+
+    /// The incoming webhooks that post to a channel.
+    pub async fn integrations(&self, id: ChannelId) -> Result<Vec<Integration>> {
+        self.get(&format!("/channels/{id}/integrations")).await
+    }
+
+    /// Add an incoming webhook to a channel (workspace admins). The secret comes back once.
+    pub async fn create_integration(
+        &self,
+        id: ChannelId,
+        req: &CreateIntegrationRequest,
+    ) -> Result<CreatedIntegration> {
+        self.post(&format!("/channels/{id}/integrations"), req)
+            .await
+    }
+
+    pub async fn delete_integration(&self, id: i64) -> Result<()> {
+        self.send::<(), _>(
+            Method::DELETE,
+            self.url(&format!("/integrations/{id}"))?,
+            None,
+        )
+        .await
+    }
+
+    /// The newest notices integrations posted to a channel, oldest first.
+    pub async fn notices(&self, id: ChannelId) -> Result<Vec<IntegrationNotice>> {
+        self.get(&format!("/channels/{id}/notices")).await
+    }
+
+    /// The full address another app sends notices to.
+    pub fn hook_url(&self, created: &CreatedIntegration) -> String {
+        let mut url = self.base.clone();
+        url.set_path(&created.path);
+        url.to_string()
+    }
+
     // Messages --------------------------------------------------------------------------------
 
     /// History of a channel: the latest page, the page `before` a message, or what came `after`
