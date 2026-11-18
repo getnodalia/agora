@@ -129,6 +129,7 @@ const SPANISH: &[(&str, &str)] = &[
     ("Channel", "Canal"),
     ("Channel name", "Nombre del canal"),
     ("Channels", "Canales"),
+    ("Check for updates…", "Buscar actualizaciones…"),
     ("Close", "Cerrar"),
     ("Close the thread", "Cerrar el hilo"),
     ("Closed", "Cerrado"),

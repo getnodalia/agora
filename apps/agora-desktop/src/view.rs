@@ -180,6 +180,9 @@ fn top_bar(
                 if ui.button(tr("About Ágora")).clicked() {
                     actions.push(Action::Dialog(Dialog::About));
                 }
+                if ui.button(tr("Check for updates…")).clicked() {
+                    actions.push(Action::CheckForUpdates);
+                }
                 if ui.button(tr("Security and devices")).clicked() {
                     actions.push(Action::Security(crate::security::SecurityAction::Load));
                 }

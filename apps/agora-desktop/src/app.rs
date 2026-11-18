@@ -34,6 +34,7 @@ pub struct App {
     applied: Option<(Theme, bool, bool)>,
     decorated: Option<bool>,
     was_focused: bool,
+    updates: crate::updates::Runtime,
     /// The menus in the desktop's top bar, where it has one.
     #[cfg(target_os = "linux")]
     global_menu: Option<crate::linux_menu::GlobalMenu>,
@@ -88,6 +89,8 @@ pub enum Panel {
 /// Something a screen asked for.
 #[derive(Clone, Debug)]
 pub enum Action {
+    /// "Check for updates…" in the main menu.
+    CheckForUpdates,
     OpenGitHubEvents,
     RefreshGitHubEvents,
     OpenOrganizations,
@@ -187,9 +190,11 @@ impl App {
             applied: None,
             decorated: None,
             was_focused: true,
+            updates: crate::updates::Runtime::default(),
             #[cfg(target_os = "linux")]
             global_menu: None,
         };
+        app.updates.start(false);
         #[cfg(target_os = "linux")]
         {
             app.global_menu = crate::linux_menu::install(&cc.egui_ctx, &app.menu_items());
@@ -234,6 +239,7 @@ impl App {
                 free || !signed_in,
             ),
             item("app.shortcuts", &app, tr("Keyboard shortcuts"), free),
+            item("app.updates", &app, tr("Check for updates…"), true),
             item("", &app, "", true),
             item("app.security", &app, tr("Security and devices"), free),
             item("app.logout", &app, tr("Log out"), signed_in),
@@ -319,6 +325,7 @@ impl App {
             "app.about" => Action::Dialog(dialogs::Dialog::About),
             "app.preferences" => Action::Dialog(dialogs::Dialog::Preferences),
             "app.shortcuts" => Action::Dialog(dialogs::Dialog::Shortcuts),
+            "app.updates" => Action::CheckForUpdates,
             "app.security" => Action::Security(crate::security::SecurityAction::Load),
             "app.logout" => Action::Logout,
             "app.logout_forget" => Action::LogoutForget,
@@ -696,6 +703,7 @@ impl App {
                     }
                     self.save_settings(now);
                 }
+                Action::CheckForUpdates => self.updates.start(true),
                 Action::Logout => self.log_out(false),
                 Action::LogoutForget => self.log_out(true),
                 Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -1743,6 +1751,7 @@ impl Main {
             }
             Action::TogglePanel
             | Action::Logout
+            | Action::CheckForUpdates
             | Action::LogoutForget
             | Action::SettingsChanged
             | Action::Copy(_)
@@ -1789,6 +1798,7 @@ impl eframe::App for App {
         }
         self.handle_replies(now);
         self.apply_appearance(&ctx);
+        self.updates.tick(&ctx);
 
         let decorated = !self.ndl_controls();
         if self.decorated != Some(decorated) {
@@ -1817,6 +1827,7 @@ impl eframe::App for App {
             Screen::Main(_) => view::show(ui, self, now),
         };
         self.act(&ctx, actions, now);
+        self.updates.show(&ctx);
 
         // Typing indicators and toasts expire on their own: wake up to remove them.
         ctx.request_repaint_after(std::time::Duration::from_secs(1));

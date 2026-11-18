@@ -21,6 +21,7 @@ agora-e2e.workspace = true
 eframe.workspace = true
 egui.workspace = true
 nodalia-theme.workspace = true
+nodalia-update = { git = "https://github.com/getnodalia/nodalia-design", rev = "114848a2ff1a7c29c9a5432fb12e955fbe0aeef2", features = ["egui"] }
 tokio = { workspace = true, features = ["fs"] }
 serde.workspace = true
 serde_json.workspace = true
