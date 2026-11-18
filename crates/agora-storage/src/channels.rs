@@ -333,8 +333,10 @@ impl Store {
         message: MessageId,
     ) -> Result<Option<MessageId>> {
         let v: Option<i64> = sqlx::query_scalar(
-            "UPDATE channel_members SET last_read_id = MAX(last_read_id, ?)
-             WHERE channel_id = ? AND user_id = ? RETURNING last_read_id",
+            "UPDATE channel_members
+             SET last_read_id = MAX(last_read_id, MIN(?1, (SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ?2))),
+                 delivered_id = MAX(delivered_id, MIN(?1, (SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ?2)))
+             WHERE channel_id = ?2 AND user_id = ?3 RETURNING last_read_id",
         )
         .bind(message.0)
         .bind(channel.0)
@@ -343,4 +345,73 @@ impl Store {
         .await?;
         Ok(v.map(MessageId))
     }
+
+    /// Move the delivery marker forward (never back, never past the channel's newest message).
+    /// Returns the receipt now stored, or `None` when `user` is not a member.
+    pub async fn mark_delivered(
+        &self,
+        channel: ChannelId,
+        user: UserId,
+        message: MessageId,
+    ) -> Result<Option<Receipt>> {
+        let row: Option<(i64, i64)> = sqlx::query_as(
+            "UPDATE channel_members
+             SET delivered_id = MAX(delivered_id, MIN(?1, (SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ?2)))
+             WHERE channel_id = ?2 AND user_id = ?3 RETURNING delivered_id, last_read_id",
+        )
+        .bind(message.0)
+        .bind(channel.0)
+        .bind(user.0)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(delivered, read)| Receipt {
+            user,
+            delivered: MessageId(delivered),
+            read: MessageId(read),
+        }))
+    }
+
+    /// Every member's receipt in a channel.
+    pub async fn receipts(&self, channel: ChannelId) -> Result<Vec<Receipt>> {
+        let rows: Vec<(i64, i64, i64)> = sqlx::query_as(
+            "SELECT user_id, delivered_id, last_read_id FROM channel_members
+             WHERE channel_id = ? ORDER BY user_id",
+        )
+        .bind(channel.0)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(user, delivered, read)| Receipt {
+                user: UserId(user),
+                delivered: MessageId(delivered),
+                read: MessageId(read),
+            })
+            .collect())
+    }
+
+    /// One member's receipt in a channel.
+    pub async fn receipt(&self, channel: ChannelId, user: UserId) -> Result<Option<Receipt>> {
+        let row: Option<(i64, i64)> = sqlx::query_as(
+            "SELECT delivered_id, last_read_id FROM channel_members
+             WHERE channel_id = ? AND user_id = ?",
+        )
+        .bind(channel.0)
+        .bind(user.0)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(delivered, read)| Receipt {
+            user,
+            delivered: MessageId(delivered),
+            read: MessageId(read),
+        }))
+    }
+}
+
+/// How far one member of a channel has received and read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receipt {
+    pub user: UserId,
+    pub delivered: MessageId,
+    pub read: MessageId,
 }

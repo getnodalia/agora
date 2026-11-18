@@ -358,3 +358,37 @@ fn paragraph(ui: &Ui, look: &Look, spans: &[Inline], me: &str) -> egui::text::La
     job.wrap.max_width = ui.available_width();
     job
 }
+
+/// Message ticks centred at `at`: one for sent, two for delivered, two in the accent for read.
+pub fn ticks(
+    painter: &egui::Painter,
+    look: &Look,
+    at: egui::Pos2,
+    delivery: crate::model::Delivery,
+) {
+    use crate::model::Delivery;
+    let p = &look.palette;
+    let colour = match delivery {
+        Delivery::Read => color(p.accent_text),
+        _ => color(p.text_tertiary),
+    };
+    let stroke = egui::Stroke::new(1.6, colour);
+    let check = |dx: f32| {
+        let o = at + egui::vec2(dx, 0.0);
+        painter.line_segment(
+            [o + egui::vec2(-4.5, 0.0), o + egui::vec2(-1.5, 3.0)],
+            stroke,
+        );
+        painter.line_segment(
+            [o + egui::vec2(-1.5, 3.0), o + egui::vec2(4.5, -3.5)],
+            stroke,
+        );
+    };
+    match delivery {
+        Delivery::Sent => check(0.0),
+        Delivery::Delivered | Delivery::Read => {
+            check(-2.5);
+            check(2.5);
+        }
+    }
+}

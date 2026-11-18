@@ -94,6 +94,8 @@ pub fn router() -> Router<AppState> {
         .route("/channels/{id}/leave", post(channels::leave))
         .route("/channels/{id}/members", post(channels::add_member))
         .route("/channels/{id}/read", post(channels::mark_read))
+        .route("/channels/{id}/delivered", post(channels::mark_delivered))
+        .route("/channels/{id}/receipts", get(channels::receipts))
         .route("/channels/{id}/mls", get(e2e::state))
         .route("/channels/{id}/mls/group", post(e2e::create_group))
         .route("/channels/{id}/mls/commit", post(e2e::commit))

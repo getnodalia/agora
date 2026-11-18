@@ -28,7 +28,7 @@ use std::time::Duration;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 
-pub use channels::ChannelRow;
+pub use channels::{ChannelRow, Receipt};
 pub use sqlx;
 
 #[derive(Debug, thiserror::Error)]

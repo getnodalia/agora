@@ -34,7 +34,9 @@ Authenticated requests carry `Authorization: Bearer <token>`. Errors are
 | `GET /channels/{id}`, `PATCH …` | One channel; rename, set the topic, archive |
 | `POST /channels/{id}/join`, `/leave` | Join a public channel; leave a channel |
 | `POST /channels/{id}/members` | `{user_id}`: add someone to a private channel |
-| `POST /channels/{id}/read` | `{message_id}`: move the read marker |
+| `POST /channels/{id}/read` | `{message_id}`: move the read marker (reading counts as received) |
+| `POST /channels/{id}/delivered` | `{message_id}`: one of the caller's devices received the messages up to this one |
+| `GET /channels/{id}/receipts` | `[{user_id, delivered_id, read_id}]`: how far each member has received and read the channel |
 | `GET /channels/{id}/messages?before=&after=&limit=` | History, oldest first, top-level messages only |
 | `POST /channels/{id}/messages` | `{ciphertext, mentions, client_nonce, thread_root_id?}`, `body` empty; a repeated nonce returns the stored message |
 | `PATCH /messages/{id}`, `DELETE …` | Edit (author, `{ciphertext, mentions}`) or delete (author or moderator) |
@@ -67,7 +69,7 @@ Client frames: `auth {token}` (first, within 10 s), `typing {channel_id, thread_
 
 Server events: `ready {user}`, `error {code, message}`, `message_created`, `message_updated`,
 `message_deleted`, `reactions_changed`, `channel_changed`, `channel_removed`, `member_joined`,
-`read_marker`, `typing`, `presence`, `mls_changed` (a conversation's group moved: catch up), `pong`.
+`read_marker`, `receipt` (a member received or read more of a conversation), `typing`, `presence`, `mls_changed` (a conversation's group moved: catch up), `pong`.
 
 Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last

@@ -626,6 +626,7 @@ impl Main {
                 }
             }
             Reply::Members(ws, result) => self.model.set_members(ws, result?),
+            Reply::Receipts(channel, result) => self.model.set_receipts(channel, result?),
             Reply::Security(reply) => {
                 if let Some(dialogs::Dialog::Security(d)) = &mut self.dialog {
                     if d.answer(reply) {
@@ -705,6 +706,14 @@ impl Main {
                     conv.loading = false;
                 }
                 self.model.apply_history(channel, before, after, result?);
+                let newest = self
+                    .model
+                    .conversations
+                    .get(&channel)
+                    .and_then(|c| c.messages.iter().map(|m| m.id).max());
+                if let Some(effect) = newest.and_then(|id| self.model.deliver(channel, id)) {
+                    self.run_effects(net, vec![effect]);
+                }
                 if self
                     .model
                     .conversations
@@ -852,6 +861,12 @@ impl Main {
                     let client = self.client.clone();
                     net.run(async move { Reply::Done(client.mark_read(channel, message).await) });
                 }
+                Effect::MarkDelivered(channel, message) => {
+                    let client = self.client.clone();
+                    net.run(
+                        async move { Reply::Done(client.mark_delivered(channel, message).await) },
+                    );
+                }
             }
         }
     }
@@ -923,6 +938,8 @@ impl Main {
         if changed {
             let secure = self.secure.clone();
             net.run(async move { net::devices(&secure, id).await });
+            let client = self.client.clone();
+            net.run(async move { Reply::Receipts(id, client.receipts(id).await) });
         }
         if let Some(ws) = self.model.workspace {
             if !self.model.members.contains_key(&ws) {
