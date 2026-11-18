@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use agora_client::{Client, ClientError, Realtime, RealtimeEvent, Secure};
 use agora_core::{ChannelId, ChannelKind, MessageId, OrganizationId, Role, UserId, WorkspaceId};
 use agora_protocol::{
-    ClientFrame, CreateChannelRequest, CreateInviteRequest, Invite, Message, RegisterRequest,
-    ServerEvent, ServerInfo, SessionResponse,
+    CallLeftReason, ClientFrame, CreateChannelRequest, CreateInviteRequest, Invite, Message,
+    RegisterRequest, ServerEvent, ServerInfo, SessionResponse,
 };
 use nodalia_theme::creator::Look;
 use nodalia_theme::for_egui::{self, Appearance};
@@ -60,6 +60,11 @@ pub struct Main {
     pub secure: Secure,
     pub model: Model,
     pub realtime: Option<Realtime>,
+    /// The call this device is in, if any.
+    pub call: Option<crate::call::Call>,
+    /// The channel whose call key is being fetched to join its call.
+    joining: Option<ChannelId>,
+    last_key_request: f64,
     /// Unsent text, per channel and thread.
     pub drafts: HashMap<(ChannelId, Option<MessageId>), String>,
     pub dialog: Option<dialogs::Dialog>,
@@ -158,6 +163,11 @@ pub enum Action {
         channel: ChannelId,
         thread: Option<MessageId>,
     },
+    /// Join the call in a channel, starting it if nobody is in it.
+    JoinCall(ChannelId),
+    LeaveCall,
+    ToggleMute,
+    ToggleCamera,
     Logout,
     /// Log out and remove this computer's device: keys, decrypted text and its place in
     /// conversations. For a shared or lost computer.
@@ -548,6 +558,9 @@ impl App {
             secure,
             model: Model::new(me),
             realtime: Some(realtime),
+            call: None,
+            joining: None,
+            last_key_request: f64::MIN,
             drafts: HashMap::new(),
             dialog: None,
             organization_generation: 0,
@@ -825,6 +838,7 @@ impl Main {
             Reply::Members(ws, result) => self.model.set_members(ws, result?),
             Reply::Receipts(channel, result) => self.model.set_receipts(channel, result?),
             Reply::Notices(channel, result) => self.model.set_notices(channel, result?),
+            Reply::CallKey(channel, joining, result) => self.call_key(channel, joining, result),
             Reply::Integrations(reply) => {
                 if let Some(dialogs::Dialog::Integrations(d)) = &mut self.dialog {
                     if d.answer(reply) {
@@ -1010,9 +1024,18 @@ impl Main {
                 self.model.connection = Connection::Connected;
                 if reconnected {
                     self.catch_up(net);
+                    // The server forgot our seat with the old connection.
+                    if let (Some(call), Some(rt)) = (&self.call, &self.realtime) {
+                        rt.send(ClientFrame::CallJoin {
+                            channel_id: call.channel,
+                            audio: !call.muted(),
+                            video: call.camera_on,
+                        });
+                    }
                 }
             }
             RealtimeEvent::Event(event) => {
+                self.call_event(net, &event, now);
                 #[cfg(target_os = "linux")]
                 if notifications
                     && matches!(&event, ServerEvent::MessageCreated { message } if self.model.should_notify(message))
@@ -1024,8 +1047,15 @@ impl Main {
                 let effects = self.model.apply(event, now);
                 self.run_effects(net, effects);
             }
-            // This device does not take part in calls yet.
-            RealtimeEvent::Media(_) => {}
+            RealtimeEvent::Media(bytes) => {
+                let need_key = self
+                    .call
+                    .as_mut()
+                    .is_some_and(|c| c.arrived(&bytes) == crate::call::Arrived::NeedKey);
+                if need_key {
+                    self.refresh_call_key(net, now);
+                }
+            }
             RealtimeEvent::Disconnected { retry_in, .. } => {
                 self.model.connection = Connection::Retrying(retry_in.as_secs().max(1));
             }
@@ -1035,6 +1065,114 @@ impl Main {
                 net.run(async move { Reply::Done(client.me().await.map(|_| ())) });
             }
         }
+    }
+
+    /// Tell the server and the others whether the microphone and camera are on.
+    fn announce_call_state(&self) {
+        if let (Some(call), Some(rt)) = (&self.call, &self.realtime) {
+            rt.send(ClientFrame::CallUpdate {
+                channel_id: call.channel,
+                audio: !call.muted(),
+                video: call.camera_on,
+            });
+        }
+    }
+
+    /// Fetch the call's current key, at most every two seconds.
+    fn refresh_call_key(&mut self, net: &Net, now: f64) {
+        let Some(channel) = self.call.as_ref().map(|c| c.channel) else {
+            return;
+        };
+        if now - self.last_key_request < 2.0 {
+            return;
+        }
+        self.last_key_request = now;
+        let secure = self.secure.clone();
+        net.run(async move { Reply::CallKey(channel, false, secure.call_key(channel).await) });
+    }
+
+    /// What a server event means for the call this device is in.
+    fn call_event(&mut self, net: &Net, event: &ServerEvent, now: f64) {
+        match event {
+            ServerEvent::CallChanged {
+                channel_id,
+                participants,
+            } => {
+                if let Some(call) = self.call.as_mut().filter(|c| c.channel == *channel_id) {
+                    for gone in self.model.calls.get(channel_id).into_iter().flatten() {
+                        if !participants.iter().any(|p| p.user_id == gone.user_id) {
+                            call.forget(gone.user_id);
+                        }
+                    }
+                }
+            }
+            ServerEvent::CallLeft { channel_id, reason } => {
+                if self.joining == Some(*channel_id) {
+                    self.joining = None;
+                }
+                if self.call.as_ref().is_some_and(|c| c.channel == *channel_id) {
+                    self.call = None;
+                }
+                self.notices.push(
+                    match reason {
+                        CallLeftReason::OtherDevice => {
+                            tr("You joined this call from another device.")
+                        }
+                        CallLeftReason::Full => tr("This call is full."),
+                        CallLeftReason::NoAccess => tr("You can't join this call."),
+                    }
+                    .to_owned(),
+                );
+            }
+            // The conversation's devices changed: so did its keys.
+            ServerEvent::MlsChanged { channel_id }
+                if self.call.as_ref().is_some_and(|c| c.channel == *channel_id) =>
+            {
+                self.refresh_call_key(net, now);
+            }
+            _ => {}
+        }
+    }
+
+    /// The key for a call arrived: start the call, or use it in the one going on.
+    fn call_key(
+        &mut self,
+        channel: ChannelId,
+        joining: bool,
+        key: Result<agora_e2e::call::CallKey, ClientError>,
+    ) {
+        let key = match key {
+            Ok(key) => key,
+            Err(e) => {
+                if joining && self.joining == Some(channel) {
+                    self.joining = None;
+                    self.notices.push(e.to_string());
+                }
+                return;
+            }
+        };
+        if let Some(call) = self.call.as_mut().filter(|c| c.channel == channel) {
+            call.add_key(key);
+            return;
+        }
+        if !joining || self.joining != Some(channel) {
+            return;
+        }
+        self.joining = None;
+        let Some(rt) = &self.realtime else {
+            return;
+        };
+        self.call = Some(crate::call::Call::start(
+            channel,
+            self.model.me.id,
+            key,
+            rt.media_sender(),
+        ));
+        rt.send(ClientFrame::CallJoin {
+            channel_id: channel,
+            audio: true,
+            video: false,
+        });
     }
 
     /// After a reconnection: refetch lists and whatever arrived while the socket was down.
@@ -1749,6 +1887,40 @@ impl Main {
                             thread_root_id: thread,
                         });
                     }
+                }
+            }
+            Action::JoinCall(channel) => {
+                if self.call.as_ref().is_some_and(|c| c.channel == channel) {
+                    return;
+                }
+                // Joining another call leaves this one.
+                self.call = None;
+                self.joining = Some(channel);
+                let secure = self.secure.clone();
+                net.run(
+                    async move { Reply::CallKey(channel, true, secure.call_key(channel).await) },
+                );
+            }
+            Action::LeaveCall => {
+                self.joining = None;
+                if let Some(call) = self.call.take() {
+                    if let Some(rt) = &self.realtime {
+                        rt.send(ClientFrame::CallLeave {
+                            channel_id: call.channel,
+                        });
+                    }
+                }
+            }
+            Action::ToggleMute => {
+                if let Some(call) = &self.call {
+                    call.set_muted(!call.muted());
+                    self.announce_call_state();
+                }
+            }
+            Action::ToggleCamera => {
+                if let Some(call) = &mut self.call {
+                    call.set_camera(!call.camera_on);
+                    self.announce_call_state();
                 }
             }
             Action::TogglePanel

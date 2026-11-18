@@ -35,6 +35,10 @@
   <!-- Must match MACOSX_DEPLOYMENT_TARGET in package.sh. -->
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Ágora uses the microphone in calls.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Ágora uses the camera in video calls.</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key>

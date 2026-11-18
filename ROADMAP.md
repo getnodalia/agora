@@ -30,12 +30,15 @@ Where Ágora is and what comes next. Only what is under "Done" exists; everythin
 - Integrations: other apps (Hito, or any signed webhook) post notices to a channel, added by
   admins from the channel's details.
 - The Linux global menu over D-Bus: Ágora's commands in the top bar of desktops that show one.
+- Voice and video calls in a channel or a direct message, up to 12 people: microphone, speaker
+  and camera on the device, sealed end to end with a key from the conversation's MLS group, relayed
+  by a server that cannot open the frames. Tested on loopback and without real hardware; audio and
+  video devices still need testing on macOS and Windows.
 
 ## Next: usable by a small team
 
-- Voice and video calls in the desktop app (microphone, camera, speaker). The server side and the
-  encryption are in place: who is in a call, end-to-end sealed audio and video, and their limits.
-
+- Call polish: screen sharing, noise suppression, echo cancellation, a better video codec than JPEG
+  and a ringing signal for direct messages.
 - A Windows installer (MSI) and the app's own icon on `agora.exe`; an in-app updater.
 - A container image for the server, and server packages for ARM (Raspberry Pi).
 - Native notifications on macOS and Windows, and unread indicators on the app icon. Linux has an

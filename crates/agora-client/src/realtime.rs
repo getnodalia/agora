@@ -59,7 +59,23 @@ pub struct Realtime {
 /// Call media waiting to go out. Beyond this, frames are dropped: late audio is worse than none.
 const MEDIA_QUEUE: usize = 32;
 
+/// A handle for sending call media from other threads (capture threads, say).
+#[derive(Clone, Debug)]
+pub struct MediaSender(mpsc::Sender<Vec<u8>>);
+
+impl MediaSender {
+    /// Same as [`Realtime::send_media`]: dropped when the connection is behind.
+    pub fn send(&self, frame: Vec<u8>) {
+        let _ = self.0.try_send(frame);
+    }
+}
+
 impl Realtime {
+    /// A cloneable handle for [`Realtime::send_media`] that can move to another thread.
+    pub fn media_sender(&self) -> MediaSender {
+        MediaSender(self.media.clone())
+    }
+
     /// Queue a frame (typing notice) for the server. Dropped while disconnected.
     pub fn send(&self, frame: ClientFrame) {
         let _ = self.frames.send(frame);

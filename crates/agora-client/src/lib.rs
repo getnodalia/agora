@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use url::Url;
 
-pub use realtime::{connect, Realtime, RealtimeEvent};
+pub use realtime::{connect, MediaSender, Realtime, RealtimeEvent};
 pub use secure::Secure;
 
 #[derive(Debug, thiserror::Error)]

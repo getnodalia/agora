@@ -15,6 +15,7 @@
 )]
 
 mod app;
+mod call;
 mod chrome;
 mod dialogs;
 mod i18n;

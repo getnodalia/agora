@@ -102,6 +102,10 @@ without an answer. The server never reads payloads: clients seal them end to end
 (label `agora call v1`, context the channel id), as `[epoch, u64][nonce, 12 bytes][ciphertext of
 sequence, u64, and media]`, the channel, sender, kind and epoch as associated data.
 
+What the media is is up to the clients; the server never looks. The desktop app sends
+audio as 16 kHz mono µ-law in 20 ms frames (the frame's kind says audio) and video as one JPEG per frame, 320 pixels wide at about 10 frames per second, so a
+frame fits well under the payload limit.
+
 Close codes: `4001` the session is invalid (do not retry), `1011` server error and `1012` server
 restart (retry with backoff). After reconnecting, a client fetches history `after` the last
 message it has, which is how nothing is lost while it was away.

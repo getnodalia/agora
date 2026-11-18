@@ -21,7 +21,7 @@ jobs:
         cargo fmt --all -- --check &&
         cargo clippy --workspace --all-targets --locked -- -D warnings &&
         cargo test --workspace --locked
-      packages: pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev
+      packages: pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev libasound2-dev
       targets: ""
       tools: ""
   git-sources:
