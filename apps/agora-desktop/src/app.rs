@@ -34,6 +34,9 @@ pub struct App {
     applied: Option<(Theme, bool, bool)>,
     decorated: Option<bool>,
     was_focused: bool,
+    /// The menus in the desktop's top bar, where it has one.
+    #[cfg(target_os = "linux")]
+    global_menu: Option<crate::linux_menu::GlobalMenu>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -155,6 +158,11 @@ pub enum Action {
     SettingsChanged,
     /// Put text on the clipboard and say so.
     Copy(String),
+    /// From the global menu, which only Linux has.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    FocusSearch,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Quit,
     // Sign-in screen.
     CheckServer,
     SignIn,
@@ -175,7 +183,13 @@ impl App {
             applied: None,
             decorated: None,
             was_focused: true,
+            #[cfg(target_os = "linux")]
+            global_menu: None,
         };
+        #[cfg(target_os = "linux")]
+        {
+            app.global_menu = crate::linux_menu::install(&cc.egui_ctx, &app.menu_items());
+        }
         app.apply_appearance(&cc.egui_ctx);
         if let Some(saved) = settings::load_session(app.dir.as_deref()) {
             app.restore(saved);
@@ -183,6 +197,149 @@ impl App {
             app.check_server();
         }
         Ok(app)
+    }
+
+    /// The commands of the global menu, in the person's language and enabled where they apply.
+    #[cfg(target_os = "linux")]
+    pub fn menu_items(&self) -> Vec<crate::linux_menu::Item> {
+        let main = match &self.screen {
+            Screen::Main(main) => Some(main),
+            _ => None,
+        };
+        let workspace = main.and_then(|m| m.model.current_workspace());
+        let channel = main.and_then(|m| m.model.channel);
+        let signed_in = main.is_some();
+        let free = main.is_some_and(|m| m.dialog.is_none());
+        let app = "Ágora".to_string();
+        let ws = tr("Workspace").to_string();
+        let conversation = tr("Conversation").to_string();
+        let view = tr("View").to_string();
+        let item =
+            |id: &'static str, menu: &String, label: &str, enabled: bool| crate::linux_menu::Item {
+                id,
+                menu: menu.clone(),
+                label: label.to_string(),
+                enabled,
+            };
+        vec![
+            item("app.about", &app, tr("About Ágora"), free),
+            item(
+                "app.preferences",
+                &app,
+                tr("Preferences"),
+                free || !signed_in,
+            ),
+            item("app.shortcuts", &app, tr("Keyboard shortcuts"), free),
+            item("", &app, "", true),
+            item("app.security", &app, tr("Security and devices"), free),
+            item("app.logout", &app, tr("Log out"), signed_in),
+            item(
+                "app.logout_forget",
+                &app,
+                tr("Log out and forget this computer"),
+                signed_in,
+            ),
+            item("", &app, "", true),
+            item("app.quit", &app, tr("Quit"), true),
+            item("workspace.create", &ws, tr("Create a workspace"), free),
+            item("workspace.join", &ws, tr("Join a workspace"), free),
+            item(
+                "workspace.invite",
+                &ws,
+                tr("Invite people"),
+                free && workspace.is_some_and(|w| w.role.can_invite()),
+            ),
+            item(
+                "workspace.channel",
+                &ws,
+                tr("Create a channel"),
+                free && workspace.is_some_and(|w| w.role.can_create_channel()),
+            ),
+            item(
+                "workspace.direct",
+                &ws,
+                tr("New direct message"),
+                free && workspace.is_some(),
+            ),
+            item(
+                "conversation.files",
+                &conversation,
+                tr("Send files"),
+                free && channel.is_some(),
+            ),
+            item(
+                "conversation.share",
+                &conversation,
+                tr("Share earlier messages"),
+                free && channel.is_some(),
+            ),
+            item("view.search", &view, tr("Search messages"), signed_in),
+            item(
+                "view.panel",
+                &view,
+                tr("Show or hide the side panel"),
+                signed_in,
+            ),
+        ]
+    }
+
+    /// Keep the global menu in step with the app, and turn what was chosen in it into actions.
+    #[cfg(target_os = "linux")]
+    fn global_menu_commands(&mut self) -> Vec<Action> {
+        let items = self.menu_items();
+        let Some(menu) = &self.global_menu else {
+            return Vec::new();
+        };
+        menu.update(&items);
+        let chosen: Vec<&'static str> = menu.commands.try_iter().collect();
+        chosen
+            .into_iter()
+            .filter_map(|id| self.menu_action(id))
+            .collect()
+    }
+
+    /// What a global menu command does: the same action as its button in the window.
+    #[cfg(target_os = "linux")]
+    fn menu_action(&self, id: &str) -> Option<Action> {
+        let channel = match &self.screen {
+            Screen::Main(main) => main.model.channel,
+            _ => None,
+        };
+        Some(match id {
+            "app.about" => Action::Dialog(dialogs::Dialog::About),
+            "app.preferences" => Action::Dialog(dialogs::Dialog::Preferences),
+            "app.shortcuts" => Action::Dialog(dialogs::Dialog::Shortcuts),
+            "app.security" => Action::Security(crate::security::SecurityAction::Load),
+            "app.logout" => Action::Logout,
+            "app.logout_forget" => Action::LogoutForget,
+            "app.quit" => Action::Quit,
+            "workspace.create" => Action::Dialog(dialogs::Dialog::CreateWorkspace {
+                name: String::new(),
+            }),
+            "workspace.join" => Action::Dialog(dialogs::Dialog::JoinWorkspace {
+                code: String::new(),
+            }),
+            "workspace.invite" => Action::Dialog(dialogs::Dialog::Invite {
+                invite: None,
+                uses: 5,
+                hours: 168,
+            }),
+            "workspace.channel" => Action::Dialog(dialogs::Dialog::create_channel()),
+            "workspace.direct" => Action::Dialog(dialogs::Dialog::NewDirect {
+                filter: String::new(),
+            }),
+            "conversation.files" => Action::AttachFiles {
+                channel: channel?,
+                thread: None,
+            },
+            "conversation.share" => Action::Dialog(dialogs::Dialog::ShareHistory {
+                channel: channel?,
+                count: 50,
+            }),
+            "view.search" => Action::FocusSearch,
+            "view.panel" => Action::TogglePanel,
+            _ => return None,
+        })
     }
 
     pub fn ndl_controls(&self) -> bool {
@@ -530,6 +687,12 @@ impl App {
                 }
                 Action::Logout => self.log_out(false),
                 Action::LogoutForget => self.log_out(true),
+                Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Action::FocusSearch => {
+                    if let Screen::Main(main) = &mut self.screen {
+                        main.focus_search = true;
+                    }
+                }
                 Action::TogglePanel => {
                     self.settings.context_panel = !self.settings.context_panel;
                     self.save_settings(now);
@@ -1536,6 +1699,8 @@ impl Main {
             | Action::LogoutForget
             | Action::SettingsChanged
             | Action::Copy(_)
+            | Action::FocusSearch
+            | Action::Quit
             | Action::CheckServer
             | Action::SignIn => {}
         }
@@ -1595,6 +1760,11 @@ impl eframe::App for App {
         self.was_focused = focused;
 
         self.toasts.retain(|t| t.until > now);
+        #[cfg(target_os = "linux")]
+        let chosen = self.global_menu_commands();
+        #[cfg(not(target_os = "linux"))]
+        let chosen = Vec::new();
+        self.act(&ctx, chosen, now);
         let actions = match &mut self.screen {
             Screen::SignIn(_) | Screen::Restoring => signin::show(ui, self),
             Screen::Main(_) => view::show(ui, self, now),
