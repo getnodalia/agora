@@ -449,6 +449,22 @@ impl Client {
         .await
     }
 
+    /// One of this person's devices received the channel's messages up to `message`.
+    pub async fn mark_delivered(&self, id: ChannelId, message: MessageId) -> Result<()> {
+        self.post(
+            &format!("/channels/{id}/delivered"),
+            &MarkReadRequest {
+                message_id: message,
+            },
+        )
+        .await
+    }
+
+    /// How far each member has received and read a channel.
+    pub async fn receipts(&self, id: ChannelId) -> Result<Vec<Receipt>> {
+        self.get(&format!("/channels/{id}/receipts")).await
+    }
+
     // Messages --------------------------------------------------------------------------------
 
     /// History of a channel: the latest page, the page `before` a message, or what came `after`

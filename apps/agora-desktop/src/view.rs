@@ -998,6 +998,17 @@ fn message_item(
     if ui.rect_contains_pointer(rect) && !popup_open {
         main.hovered = Some((message.id, threads));
     }
+    if let Some(status) = main.model.status(message) {
+        let anchor = pos2(rect.right() - 20.0, rect.bottom() - 12.0);
+        let tick = Rect::from_center_size(anchor, vec2(20.0, 14.0));
+        widgets::ticks(ui.painter(), look, anchor, status.delivery);
+        let response = ui.interact(
+            tick,
+            ui.scope_id().with(("ticks", message.id, threads)),
+            egui::Sense::hover(),
+        );
+        response.on_hover_text(status_text(status));
+    }
     if main.hovered == Some((message.id, threads)) {
         if !ui.rect_contains_pointer(rect) && !popup_open {
             main.hovered = None;
@@ -1014,6 +1025,23 @@ fn message_item(
                 toolbar(ui, main, look, message, rect, threads, actions);
             }
         }
+    }
+}
+
+/// What the ticks beside one of this person's messages mean, in words.
+fn status_text(status: crate::model::Status) -> String {
+    use crate::model::Delivery;
+    if status.others == 0 {
+        return tr("Sent").to_string();
+    }
+    let (n, total) = (status.read.to_string(), status.others.to_string());
+    match status.delivery {
+        Delivery::Read => tr("Read").to_string(),
+        Delivery::Delivered => trf("Delivered · read by {} of {}", &[&n, &total]),
+        Delivery::Sent => trf(
+            "Sent · delivered to {} of {}",
+            &[&status.delivered.to_string(), &total],
+        ),
     }
 }
 

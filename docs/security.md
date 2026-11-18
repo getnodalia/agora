@@ -45,6 +45,9 @@ End-to-end encryption hides the text, not the rest:
   size, which thread it belongs to, and whom it mentions (the sender's device tells the server,
   so it can count unread mentions);
 - reactions (the emoji, in clear), read markers, typing and presence;
+- delivery and read receipts: how far each member has received and read each conversation. Every
+  member who can read a conversation sees everyone's receipts in it (the ticks beside a message);
+  there is no setting to hide them yet.
 - the devices of each person and when they change.
 - workspace icons: optional PNG images are stored without end-to-end encryption and are visible
   to workspace members and the server. The icon API is not yet connected to the desktop app.

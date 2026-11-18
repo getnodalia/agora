@@ -1,7 +1,7 @@
 use agora_core::{roles, validate, ChannelId, ChannelKind, WorkspaceId};
 use agora_protocol::{
     AddChannelMemberRequest, Channel, CreateChannelRequest, MarkReadRequest, OpenDirectRequest,
-    ServerEvent, UpdateChannelRequest,
+    Receipt, ServerEvent, UpdateChannelRequest,
 };
 use agora_storage::ChannelRow;
 use axum::extract::{Path, State};
@@ -244,6 +244,7 @@ pub async fn mark_read(
     Json(req): Json<MarkReadRequest>,
 ) -> AppResult<StatusCode> {
     let access = channel_access(&state, ChannelId(id), auth.user.id).await?;
+    let before = state.store.receipt(access.channel.id, auth.user.id).await?;
     if let Some(marker) = state
         .store
         .mark_read(access.channel.id, auth.user.id, req.message_id)
@@ -256,6 +257,69 @@ pub async fn mark_read(
                 message_id: marker,
             },
         );
+        let after = state.store.receipt(access.channel.id, auth.user.id).await?;
+        announce_receipt(&state, &access.channel, before, after).await?;
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// One of the caller's devices received messages up to `message_id`.
+pub async fn mark_delivered(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+    Json(req): Json<MarkReadRequest>,
+) -> AppResult<StatusCode> {
+    let access = channel_access(&state, ChannelId(id), auth.user.id).await?;
+    let before = state.store.receipt(access.channel.id, auth.user.id).await?;
+    let after = state
+        .store
+        .mark_delivered(access.channel.id, auth.user.id, req.message_id)
+        .await?;
+    announce_receipt(&state, &access.channel, before, after).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// How far each member has received and read a conversation the caller can read.
+pub async fn receipts(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Vec<Receipt>>> {
+    let access = channel_access(&state, ChannelId(id), auth.user.id).await?;
+    let receipts = state.store.receipts(access.channel.id).await?;
+    Ok(Json(receipts.into_iter().map(wire_receipt).collect()))
+}
+
+fn wire_receipt(r: agora_storage::Receipt) -> Receipt {
+    Receipt {
+        user_id: r.user,
+        delivered_id: r.delivered,
+        read_id: r.read,
+    }
+}
+
+/// Tell everyone who can read the channel that a member's receipt moved (and nothing when it
+/// did not, so repeated calls cost no traffic).
+async fn announce_receipt(
+    state: &AppState,
+    channel: &ChannelRow,
+    before: Option<agora_storage::Receipt>,
+    after: Option<agora_storage::Receipt>,
+) -> AppResult<()> {
+    let Some(after) = after else {
+        return Ok(());
+    };
+    if before == Some(after) {
+        return Ok(());
+    }
+    let audience = state.store.channel_audience(channel).await?;
+    state.hub.send(
+        &audience,
+        &ServerEvent::Receipt {
+            channel_id: channel.id,
+            receipt: wire_receipt(after),
+        },
+    );
+    Ok(())
 }

@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use agora_core::{ChannelId, ChannelKind, MessageId, UserId, WorkspaceId};
 use agora_protocol::{
-    Channel, Member, Message, MessagePage, Reaction, ServerEvent, Thread, User, Workspace,
+    Channel, Member, Message, MessagePage, Reaction, Receipt, ServerEvent, Thread, User, Workspace,
 };
 
 /// A message this client sent that the server has not confirmed yet.
@@ -92,6 +92,29 @@ pub enum Effect {
     RefreshWorkspaces,
     RefreshChannels(WorkspaceId),
     MarkRead(ChannelId, MessageId),
+    /// Tell the server this device received the channel's messages up to here.
+    MarkDelivered(ChannelId, MessageId),
+}
+
+/// What happened to one of this person's messages, as the ticks beside it show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Delivery {
+    /// On the server; nobody else's device has it yet.
+    Sent,
+    /// Every other member's devices have it.
+    Delivered,
+    /// Every other member has seen it.
+    Read,
+}
+
+/// One of this person's messages: what happened to it, and how many of the other members
+/// received and read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Status {
+    pub delivery: Delivery,
+    pub delivered: usize,
+    pub read: usize,
+    pub others: usize,
 }
 
 pub const TYPING_SECONDS: f64 = 6.0;
@@ -115,6 +138,10 @@ pub struct Model {
     pub focused: bool,
     /// The devices that can read each conversation, as this device's encryption group sees them.
     pub devices: HashMap<ChannelId, Vec<agora_e2e::Leaf>>,
+    /// How far each member has received and read each conversation.
+    pub receipts: HashMap<ChannelId, HashMap<UserId, Receipt>>,
+    /// The newest message this device already told the server it received, per channel.
+    pub delivered: HashMap<ChannelId, MessageId>,
 }
 
 impl Model {
@@ -134,7 +161,58 @@ impl Model {
             connection: Connection::Connecting,
             focused: true,
             devices: HashMap::new(),
+            receipts: HashMap::new(),
+            delivered: HashMap::new(),
         }
+    }
+
+    /// Replace what is known of a conversation's receipts.
+    pub fn set_receipts(&mut self, channel: ChannelId, receipts: Vec<Receipt>) {
+        self.receipts.insert(
+            channel,
+            receipts.into_iter().map(|r| (r.user_id, r)).collect(),
+        );
+    }
+
+    /// `MarkDelivered` when `id` is newer than what this device already reported.
+    pub fn deliver(&mut self, channel: ChannelId, id: MessageId) -> Option<Effect> {
+        let known = self.delivered.entry(channel).or_insert(MessageId(0));
+        if id > *known {
+            *known = id;
+            Some(Effect::MarkDelivered(channel, id))
+        } else {
+            None
+        }
+    }
+
+    /// The ticks for one of this person's messages; `None` for someone else's.
+    pub fn status(&self, message: &Message) -> Option<Status> {
+        if message.author.id != self.me.id || message.deleted {
+            return None;
+        }
+        let others: Vec<&Receipt> = self
+            .receipts
+            .get(&message.channel_id)
+            .map(|all| all.values().filter(|r| r.user_id != self.me.id).collect())
+            .unwrap_or_default();
+        let delivered = others
+            .iter()
+            .filter(|r| r.delivered_id >= message.id)
+            .count();
+        let read = others.iter().filter(|r| r.read_id >= message.id).count();
+        let delivery = if others.is_empty() || delivered < others.len() {
+            Delivery::Sent
+        } else if read < others.len() {
+            Delivery::Delivered
+        } else {
+            Delivery::Read
+        };
+        Some(Status {
+            delivery,
+            delivered,
+            read,
+            others: others.len(),
+        })
     }
 
     pub fn current_workspace(&self) -> Option<&Workspace> {
@@ -435,6 +513,15 @@ impl Model {
                     }
                 }
             }
+            ServerEvent::Receipt {
+                channel_id,
+                receipt,
+            } => {
+                let all = self.receipts.entry(channel_id).or_default();
+                let slot = all.entry(receipt.user_id).or_insert(receipt);
+                slot.delivered_id = slot.delivered_id.max(receipt.delivered_id);
+                slot.read_id = slot.read_id.max(receipt.read_id);
+            }
             ServerEvent::Typing {
                 channel_id,
                 thread_root_id,
@@ -503,6 +590,9 @@ impl Model {
 
         let channel = message.channel_id;
         let id = message.id;
+        if !mine {
+            effects.extend(self.deliver(channel, id));
+        }
         let mentions_me = agora_core::format::mentions(&message.body).contains(&self.me.username);
         match message.thread_root_id {
             Some(root) => {
@@ -714,7 +804,13 @@ mod tests {
             },
             0.0,
         );
-        assert_eq!(effects, [Effect::MarkRead(ChannelId(10), MessageId(1))]);
+        assert_eq!(
+            effects,
+            [
+                Effect::MarkDelivered(ChannelId(10), MessageId(1)),
+                Effect::MarkRead(ChannelId(10), MessageId(1))
+            ]
+        );
         assert_eq!(m.channel_info(ChannelId(10)).unwrap().unread, 0);
 
         m.apply(
@@ -895,7 +991,67 @@ mod tests {
             },
             0.0,
         );
-        assert_eq!(effects, [Effect::RefreshChannels(WorkspaceId(1))]);
+        assert_eq!(
+            effects,
+            [
+                Effect::MarkDelivered(ChannelId(99), MessageId(9)),
+                Effect::RefreshChannels(WorkspaceId(1))
+            ]
+        );
+    }
+
+    #[test]
+    fn ticks_follow_every_other_members_receipt() {
+        use agora_protocol::Receipt;
+        let mut m = model();
+        let ana = m.me.clone();
+        let mine = message(5, 10, &ana, "hola");
+        let r = |user: i64, delivered: i64, read: i64| Receipt {
+            user_id: UserId(user),
+            delivered_id: MessageId(delivered),
+            read_id: MessageId(read),
+        };
+        assert_eq!(m.status(&mine).map(|s| s.delivery), Some(Delivery::Sent));
+        m.set_receipts(ChannelId(10), vec![r(1, 5, 5), r(2, 5, 0), r(3, 4, 0)]);
+        let s = m.status(&mine).unwrap();
+        assert_eq!(
+            (s.delivery, s.delivered, s.read, s.others),
+            (Delivery::Sent, 1, 0, 2)
+        );
+        m.apply(
+            ServerEvent::Receipt {
+                channel_id: ChannelId(10),
+                receipt: r(3, 6, 0),
+            },
+            0.0,
+        );
+        assert_eq!(m.status(&mine).unwrap().delivery, Delivery::Delivered);
+        m.apply(
+            ServerEvent::Receipt {
+                channel_id: ChannelId(10),
+                receipt: r(2, 5, 5),
+            },
+            0.0,
+        );
+        // An older event never moves a receipt back.
+        m.apply(
+            ServerEvent::Receipt {
+                channel_id: ChannelId(10),
+                receipt: r(3, 1, 9),
+            },
+            0.0,
+        );
+        assert_eq!(m.status(&mine).unwrap().delivery, Delivery::Read);
+        assert_eq!(m.status(&message(6, 10, &user(2, "luis"), "x")), None);
+    }
+
+    #[test]
+    fn delivery_is_reported_once_per_message() {
+        let mut m = model();
+        assert!(m.deliver(ChannelId(1), MessageId(3)).is_some());
+        assert!(m.deliver(ChannelId(1), MessageId(3)).is_none());
+        assert!(m.deliver(ChannelId(1), MessageId(2)).is_none());
+        assert!(m.deliver(ChannelId(1), MessageId(4)).is_some());
     }
 
     #[test]

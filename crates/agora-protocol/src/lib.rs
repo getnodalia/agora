@@ -380,6 +380,15 @@ pub struct MarkReadRequest {
     pub message_id: MessageId,
 }
 
+/// How far one member of a conversation has received and read it: every message up to
+/// `delivered_id` reached one of their devices, and they have seen every one up to `read_id`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receipt {
+    pub user_id: UserId,
+    pub delivered_id: MessageId,
+    pub read_id: MessageId,
+}
+
 // ---------------------------------------------------------------------------------------------
 // Messages
 
@@ -688,6 +697,11 @@ pub enum ServerEvent {
     ReadMarker {
         channel_id: ChannelId,
         message_id: MessageId,
+    },
+    /// A member of a conversation the caller can read received or read more of it.
+    Receipt {
+        channel_id: ChannelId,
+        receipt: Receipt,
     },
     Typing {
         channel_id: ChannelId,
