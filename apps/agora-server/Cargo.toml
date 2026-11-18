@@ -20,11 +20,13 @@ agora-core.workspace = true
 agora-e2e.workspace = true
 agora-protocol.workspace = true
 agora-storage.workspace = true
+png.workspace = true
 argon2.workspace = true
 aes = { version = "0.8", features = ["zeroize"] }
 aes-gcm = { version = "0.10", features = ["zeroize"] }
 totp-rs = { version = "6", default-features = false, features = ["std", "zeroize"] }
 zeroize = "1"
+hmac = "0.12"
 axum.workspace = true
 base64.workspace = true
 futures-util.workspace = true

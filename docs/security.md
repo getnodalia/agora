@@ -46,6 +46,11 @@ End-to-end encryption hides the text, not the rest:
   so it can count unread mentions);
 - reactions (the emoji, in clear), read markers, typing and presence;
 - the devices of each person and when they change.
+- workspace icons: optional PNG images are stored without end-to-end encryption and are visible
+  to workspace members and the server. The icon API is not yet connected to the desktop app.
+- GitHub event metadata in the optional server-side inbox is server-readable and visible to all
+  members of the configured workspace. It is separate from encrypted messages. See
+  [github-webhook.md](github-webhook.md) for its limits and replay markers.
 
 ### What it does not protect against
 
@@ -140,9 +145,9 @@ terms; keep production at `info` (the default).
 
 ## Known limits
 
-- No two-factor sign-in, password reset by email or account deletion yet. The server contains
-  building blocks for TOTP and protected secrets, but they are not connected to accounts, session
-  restrictions, recovery or key management and provide no MFA protection in this version.
+- No two-factor sign-in, password reset by email or account deletion yet. MFA cryptography and
+  storage primitives are not connected to enrollment, login, session restrictions, key management
+  or recovery UI; they do not enforce MFA in this version.
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end
   encryption".
