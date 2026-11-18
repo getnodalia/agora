@@ -1,9 +1,147 @@
-//! Unwired second-factor verification. This alone is not an authentication flow.
+//! Second-factor verification for sign-in, and the server's sealing key.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use agora_core::UserId;
 use agora_storage::Store;
+use rand::{rngs::OsRng, RngCore};
+use zeroize::Zeroizing;
 
+use crate::config::Config;
 use crate::mfa_crypto::{self, MfaError, MfaKey};
+
+/// How long a new secret waits for its first code.
+const PENDING_MS: i64 = 10 * 60 * 1000;
+
+type Pending = HashMap<UserId, (Zeroizing<[u8; 20]>, i64)>;
+
+/// The sealing key and secrets shown to a person but not yet confirmed with a code.
+pub struct Mfa {
+    pub key: MfaKey,
+    pending: Mutex<Pending>,
+}
+
+impl Mfa {
+    /// Read the key file, or create it (owner-only) on first start. An in-memory database gets
+    /// an in-memory key, which is right for tests and nothing else.
+    pub fn load(config: &Config) -> std::io::Result<Self> {
+        let path = config
+            .mfa_key_file
+            .clone()
+            .or_else(|| default_key_path(&config.database));
+        let key = match path {
+            Some(path) => read_or_create(&path)?,
+            None => random_key()?,
+        };
+        Ok(Self::with_key(MfaKey::new(key)))
+    }
+
+    pub fn with_key(key: MfaKey) -> Self {
+        Self {
+            key,
+            pending: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn set_pending(&self, user: UserId, secret: Zeroizing<[u8; 20]>, now: i64) {
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        pending.retain(|_, (_, at)| now.saturating_sub(*at) < PENDING_MS);
+        pending.insert(user, (secret, now));
+    }
+
+    /// The pending secret if it is still fresh. It stays until enrollment succeeds.
+    pub fn pending(&self, user: UserId, now: i64) -> Option<Zeroizing<[u8; 20]>> {
+        let pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        pending
+            .get(&user)
+            .filter(|(_, at)| now.saturating_sub(*at) < PENDING_MS)
+            .map(|(secret, _)| secret.clone())
+    }
+
+    pub fn clear_pending(&self, user: UserId) {
+        self.pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&user);
+    }
+}
+
+fn default_key_path(database: &str) -> Option<PathBuf> {
+    let rest = database.strip_prefix("sqlite://").or_else(|| database.strip_prefix("sqlite:"))?;
+    let file = rest.split('?').next()?;
+    if file.is_empty() || file.starts_with(':') {
+        return None;
+    }
+    Some(PathBuf::from(format!("{file}.mfa-key")))
+}
+
+fn random_key() -> std::io::Result<Zeroizing<[u8; 32]>> {
+    let mut key = Zeroizing::new([0u8; 32]);
+    OsRng
+        .try_fill_bytes(key.as_mut())
+        .map_err(std::io::Error::other)?;
+    Ok(key)
+}
+
+fn read_or_create(path: &Path) -> std::io::Result<Zeroizing<[u8; 32]>> {
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let bytes = Zeroizing::new(bytes);
+            let key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{} must hold exactly 32 bytes", path.display()),
+                )
+            })?;
+            Ok(Zeroizing::new(key))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let key = random_key()?;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(path)?;
+            std::io::Write::write_all(&mut file, key.as_ref())?;
+            file.sync_all()?;
+            tracing::info!(path = %path.display(), "created the two-step verification key");
+            Ok(key)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Check a current code for a signed-in account (turning the factor off, new recovery codes).
+/// Each code is accepted once.
+pub async fn verify_current_code(
+    store: &Store,
+    key: &MfaKey,
+    user: UserId,
+    token: &str,
+    now_ms: i64,
+) -> Result<bool, Error> {
+    let Ok(now_secs) = u64::try_from(now_ms / 1000) else {
+        return Ok(false);
+    };
+    let Some((sealed, last_step)) = store.totp_factor(user).await? else {
+        return Ok(false);
+    };
+    let secret = key.open(user, &sealed)?;
+    let Some(step) =
+        mfa_crypto::verify_totp(&secret, token, now_secs, u64::try_from(last_step).ok())?
+    else {
+        return Ok(false);
+    };
+    let Ok(step) = i64::try_from(step) else {
+        return Ok(false);
+    };
+    Ok(store.consume_totp_step(user, step).await?)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -15,7 +153,6 @@ pub enum Error {
 
 /// The password must already have been verified and attempts rate-limited by the caller.
 /// The caller must supply a freshly generated session-token hash and a trusted server time.
-/// This function is not connected to sign-in, enrollment, or any HTTP endpoint.
 pub async fn verify_totp_and_create_session(
     store: &Store,
     key: &MfaKey,
@@ -70,7 +207,30 @@ pub async fn verify_recovery_and_create_session(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use zeroize::Zeroizing;
+
+    #[test]
+    fn key_file_sits_next_to_the_database() {
+        assert_eq!(
+            default_key_path("sqlite://agora.db"),
+            Some(PathBuf::from("agora.db.mfa-key"))
+        );
+        assert_eq!(
+            default_key_path("sqlite:///var/lib/agora/agora.db?mode=rwc"),
+            Some(PathBuf::from("/var/lib/agora/agora.db.mfa-key"))
+        );
+        assert_eq!(default_key_path("sqlite::memory:"), None);
+    }
+
+    #[test]
+    fn key_file_is_created_once_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("k");
+        let a = read_or_create(&path).unwrap();
+        let b = read_or_create(&path).unwrap();
+        assert_eq!(*a, *b);
+        std::fs::write(&path, b"short").unwrap();
+        assert!(read_or_create(&path).is_err());
+    }
 
     #[tokio::test]
     async fn verified_factor_is_bound_to_user_and_consumed_before_session() {

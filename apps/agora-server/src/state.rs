@@ -3,6 +3,7 @@ use std::sync::Arc;
 use agora_storage::Store;
 
 use crate::config::Config;
+use crate::mfa_service::Mfa;
 use crate::hub::Hub;
 use crate::limiter::Limiter;
 
@@ -16,4 +17,6 @@ pub struct AppState {
     /// An Argon2id hash of a random password, checked when a login names an unknown account so
     /// that both cases take the same time.
     pub dummy_hash: Arc<str>,
+    /// Two-step verification: the sealing key and secrets waiting for confirmation.
+    pub mfa: Arc<Mfa>,
 }

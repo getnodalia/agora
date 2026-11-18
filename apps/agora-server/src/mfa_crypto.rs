@@ -1,5 +1,5 @@
-//! Primitives for future mandatory MFA. This module is not wired into sign-in or persistence.
-//! One-time use must be enforced atomically in storage, not by these functions alone.
+//! Two-step verification primitives: sealing TOTP secrets, checking codes and recovery codes.
+//! One-time use is enforced atomically in storage, not by these functions alone.
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -129,6 +129,53 @@ pub fn verify_totp(
         .filter(|step| last_used.is_none_or(|last| *step > last)))
 }
 
+/// RFC 4648 base32 without padding, as authenticator apps expect.
+pub fn base32(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut out = String::with_capacity(bytes.len().saturating_mul(8).div_ceil(5));
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for &b in bytes {
+        buffer = (buffer << 8) | u32::from(b);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(char::from(ALPHABET[((buffer >> bits) & 31) as usize]));
+        }
+        buffer &= (1 << bits) - 1;
+    }
+    if bits > 0 {
+        out.push(char::from(ALPHABET[((buffer << (5 - bits)) & 31) as usize]));
+    }
+    out
+}
+
+/// The `otpauth://` URI authenticator apps read from a QR code.
+pub fn otpauth_uri(issuer: &str, account: &str, secret: &[u8]) -> String {
+    let issuer = percent(issuer);
+    format!(
+        "otpauth://totp/{issuer}:{}?secret={}&issuer={issuer}&algorithm=SHA1&digits=6&period=30",
+        percent(account),
+        base32(secret)
+    )
+}
+
+fn percent(text: &str) -> String {
+    let mut out = String::new();
+    for b in text.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Recovery codes are typed by people: accept spaces and dashes they may add.
+pub fn normalize_code(code: &str) -> String {
+    code.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
 /// A recovery token has 128 bits of OS-generated entropy. The caller must display it only once
 /// and atomically consume its hash; neither hashing nor generation alone ensures one-time use.
 pub fn new_recovery_token() -> Result<Zeroizing<String>, MfaError> {
@@ -169,6 +216,20 @@ mod tests {
             verify_totp(b"short", "287082", 59, None),
             Err(MfaError::InvalidSecret)
         );
+    }
+
+    #[test]
+    fn base32_and_uri_match_rfc_4648_and_key_uri_format() {
+        assert_eq!(base32(b""), "");
+        assert_eq!(base32(b"f"), "MY");
+        assert_eq!(base32(b"foobar"), "MZXW6YTBOI");
+        assert_eq!(
+            base32(b"12345678901234567890"),
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+        );
+        let uri = otpauth_uri("Ágora", "ana smith", b"12345678901234567890");
+        assert!(uri.starts_with("otpauth://totp/%C3%81gora:ana%20smith?secret=GEZDG"));
+        assert!(uri.contains("&issuer=%C3%81gora&"));
     }
 
     #[test]

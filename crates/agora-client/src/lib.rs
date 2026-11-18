@@ -204,10 +204,17 @@ impl Client {
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<(Client, SessionResponse)> {
-        let req = LoginRequest {
+        self.login_with(&LoginRequest {
             username: username.to_owned(),
             password: password.to_owned(),
-        };
+            totp: None,
+            recovery_code: None,
+        })
+        .await
+    }
+
+    /// Log in with a second factor. A missing one fails with `ErrorCode::MfaRequired`.
+    pub async fn login_with(&self, req: &LoginRequest) -> Result<(Client, SessionResponse)> {
         let session: SessionResponse = self.post("/auth/login", &req).await?;
         Ok((self.clone().with_token(session.token.clone()), session))
     }
@@ -223,6 +230,56 @@ impl Client {
             password: password.to_owned(),
         };
         self.post("/auth/sessions/revoke-others", &req).await
+    }
+
+    // Two-step verification ------------------------------------------------------------------
+
+    pub async fn mfa_status(&self) -> Result<MfaStatus> {
+        self.get("/auth/mfa").await
+    }
+
+    /// A new authenticator secret; it becomes active with [`Client::mfa_enable`].
+    pub async fn mfa_setup(&self, password: &str) -> Result<MfaSetup> {
+        self.post(
+            "/auth/mfa/setup",
+            &MfaSetupRequest {
+                password: password.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Confirm the pending secret. Other sessions are signed out; the codes are shown once.
+    pub async fn mfa_enable(&self, code: &str) -> Result<MfaRecoveryCodes> {
+        self.post(
+            "/auth/mfa/enable",
+            &MfaCodeRequest {
+                code: code.to_owned(),
+            },
+        )
+        .await
+    }
+
+    pub async fn mfa_disable(&self, password: &str, code: &str) -> Result<()> {
+        self.post(
+            "/auth/mfa/disable",
+            &MfaDisableRequest {
+                password: password.to_owned(),
+                code: code.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Replace every recovery code; the old ones stop working.
+    pub async fn mfa_new_recovery_codes(&self, code: &str) -> Result<MfaRecoveryCodes> {
+        self.post(
+            "/auth/mfa/recovery-codes",
+            &MfaCodeRequest {
+                code: code.to_owned(),
+            },
+        )
+        .await
     }
 
     pub async fn me(&self) -> Result<User> {

@@ -38,12 +38,15 @@ pub async fn build(config: Config) -> Result<(Router, AppState), agora_storage::
         .map_err(|_| {
             agora_storage::StoreError::Corrupt("could not initialise password hashing".into())
         })?;
+    let mfa = mfa_service::Mfa::load(&config)
+        .map_err(|e| agora_storage::StoreError::Corrupt(format!("two-step verification key: {e}")))?;
     let state = AppState {
         store,
         config: Arc::new(config),
         hub: Arc::default(),
         limiter: Arc::default(),
         dummy_hash: dummy_hash.into(),
+        mfa: Arc::new(mfa),
     };
     Ok((router(state.clone()), state))
 }

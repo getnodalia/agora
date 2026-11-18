@@ -47,6 +47,9 @@ pub enum ErrorCode {
     /// The conversation's encryption moved on (a device joined or left) since the request was
     /// prepared: process the new log entries, then encrypt again.
     StaleEpoch,
+    /// The password was right and the account has two-step verification: send the login again
+    /// with `totp` or `recovery_code`.
+    MfaRequired,
     /// The server failed; the details are in its log.
     Internal,
 }
@@ -104,6 +107,54 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// The six-digit code from an authenticator app, when the account has two-step verification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp: Option<String>,
+    /// One of the account's single-use recovery codes, instead of `totp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_code: Option<String>,
+}
+
+/// Two-step verification (TOTP) for the signed-in account.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MfaStatus {
+    pub enabled: bool,
+    /// Unused recovery codes; 0 when disabled.
+    pub recovery_codes_left: u32,
+}
+
+/// Start enabling two-step verification. The password is asked again.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaSetupRequest {
+    pub password: String,
+}
+
+/// A new secret for the authenticator app. It is not active until confirmed with a code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaSetup {
+    /// Base32, for typing into an authenticator app.
+    pub secret: String,
+    /// `otpauth://totp/...`, for a QR code.
+    pub uri: String,
+}
+
+/// Confirm the pending secret with a current code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaCodeRequest {
+    pub code: String,
+}
+
+/// Turn two-step verification off: the password and a current code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaDisableRequest {
+    pub password: String,
+    pub code: String,
+}
+
+/// Recovery codes, shown once. Each signs in one time instead of a code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MfaRecoveryCodes {
+    pub recovery_codes: Vec<String>,
 }
 
 /// Reauthenticate before revoking all other sessions.
