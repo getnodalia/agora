@@ -36,6 +36,8 @@ tracing-subscriber.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = "4.19"
+# The global menu (com.canonical.dbusmenu), on the zbus the portal file dialogs already use.
+zbus = "5.19"
 
 [lints]
 workspace = true

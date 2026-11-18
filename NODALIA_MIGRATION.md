@@ -31,7 +31,8 @@ None: Ágora has no upstream.
   copy (`widgets::search_field`) until nodalia-design centres it.
 - An emoji picker and a chat message list are drawn in Ágora; if another app needs them, they move
   to nodalia-design.
-- Global menu over D-Bus on Linux, the in-window menu bar only where there is none.
+- Done: the Linux global menu over D-Bus (`linux_menu.rs`, as Toma and Pluma do). Ágora has no
+  in-window menu bar, only NDL's hamburger menu, which stays on every desktop.
 
 ## Missing tests
 
