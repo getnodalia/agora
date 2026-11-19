@@ -269,14 +269,13 @@ fn format_rank(format: nokhwa::utils::FrameFormat) -> Option<u8> {
     }
 }
 
-/// The mode to open a camera in, out of the ones it offers: the size nearest 640x480, then the
-/// rate nearest 15, then the format that decodes cheapest. Cameras differ in the formats they
-/// list (the Mac's offer no MJPEG, and not every size at every rate), so asking for one exact mode
-/// fails on some; choosing among what is listed never does while one mode can be decoded.
-fn pick_camera_format(
-    formats: &[nokhwa::utils::CameraFormat],
-) -> Option<nokhwa::utils::CameraFormat> {
-    formats
+/// The modes a camera lists, best first: the size nearest 640x480, then the rate nearest 15, then
+/// the format that decodes cheapest. Cameras differ in what they list (the Mac's offer no MJPEG,
+/// and not every size at every rate), and a listed mode is not always one the camera accepts: on
+/// macOS a rate is listed for the low end of a range but only the top of the range can be set,
+/// so the caller tries these in order until one is taken.
+fn camera_candidates(formats: &[nokhwa::utils::CameraFormat]) -> Vec<nokhwa::utils::CameraFormat> {
+    let mut ranked: Vec<_> = formats
         .iter()
         .filter_map(|mode| {
             let rank = format_rank(mode.format())?;
@@ -294,8 +293,18 @@ fn pick_camera_format(
                 *mode,
             ))
         })
-        .min_by_key(|(key, _)| *key)
-        .map(|(_, mode)| mode)
+        .collect();
+    ranked.sort_by_key(|(key, _)| *key);
+    ranked.into_iter().map(|(_, mode)| mode).collect()
+}
+
+/// Apply the first of these modes the camera accepts and say which it was. `None` when none was
+/// taken: the camera then keeps the mode it already has, which is still a picture worth showing.
+fn first_accepted<T, E>(
+    candidates: &[nokhwa::utils::CameraFormat],
+    mut apply: impl FnMut(nokhwa::utils::CameraFormat) -> Result<T, E>,
+) -> Option<nokhwa::utils::CameraFormat> {
+    candidates.iter().copied().find(|mode| apply(*mode).is_ok())
 }
 
 /// Ask the system for permission to use the camera and wait for the answer (macOS asks; the
@@ -333,13 +342,12 @@ fn run_camera(stop: &AtomicBool, shot: impl Fn(Shot)) -> Result<(), Problem> {
     let modes = camera
         .compatible_camera_formats()
         .map_err(|e| Problem::because(Device::Camera, e))?;
-    if let Some(mode) = pick_camera_format(&modes) {
-        camera
-            .set_camera_requset(RequestedFormat::new::<RgbFormat>(
-                RequestedFormatType::Exact(mode),
-            ))
-            .map_err(|e| Problem::because(Device::Camera, e))?;
-    }
+    // Try the modes best first; a camera that takes none still streams in the mode it has.
+    first_accepted(&camera_candidates(&modes), |mode| {
+        camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
+            RequestedFormatType::Exact(mode),
+        ))
+    });
     camera
         .open_stream()
         .map_err(|e| Problem::because(Device::Camera, e))?;
@@ -400,7 +408,7 @@ mod tests {
         )));
         assert_eq!(old.fulfill(&mac), None);
 
-        let picked = pick_camera_format(&mac).expect("a mode");
+        let picked = camera_candidates(&mac)[0];
         assert_eq!(picked.resolution(), Resolution::new(640, 360));
     }
 
@@ -411,7 +419,7 @@ mod tests {
             mode(640, 480, FrameFormat::MJPEG, 30),
             mode(320, 240, FrameFormat::MJPEG, 30),
         ];
-        let picked = pick_camera_format(&modes).expect("a mode");
+        let picked = camera_candidates(&modes)[0];
         assert_eq!(picked.resolution(), Resolution::new(640, 480));
     }
 
@@ -423,7 +431,7 @@ mod tests {
             mode(640, 480, FrameFormat::YUYV, 15),
             mode(640, 480, FrameFormat::MJPEG, 15),
         ];
-        let picked = pick_camera_format(&modes).expect("a mode");
+        let picked = camera_candidates(&modes)[0];
         assert_eq!(picked.frame_rate(), 15);
         assert_eq!(picked.format(), FrameFormat::MJPEG);
     }
@@ -435,7 +443,38 @@ mod tests {
             mode(0, 0, FrameFormat::MJPEG, 15),
             mode(0, 480, FrameFormat::YUYV, 15),
         ];
-        assert_eq!(pick_camera_format(&modes), None);
-        assert_eq!(pick_camera_format(&[]), None);
+        assert!(camera_candidates(&modes).is_empty());
+        assert!(camera_candidates(&[]).is_empty());
+    }
+
+    /// What Daniel's Mac did: it lists 640x480 at 15 (the low end of a 15-30 range), and only the
+    /// top of a range can be set, so that mode was refused and the camera never started.
+    #[test]
+    fn a_listed_mode_the_camera_refuses_is_skipped_for_the_next_one() {
+        let modes = vec![
+            mode(640, 480, FrameFormat::YUYV, 15),
+            mode(640, 480, FrameFormat::YUYV, 30),
+            mode(1280, 720, FrameFormat::NV12, 30),
+        ];
+        let candidates = camera_candidates(&modes);
+        assert_eq!(candidates[0], mode(640, 480, FrameFormat::YUYV, 15));
+        let mut tried = Vec::new();
+        let taken = first_accepted(&candidates, |m| {
+            tried.push(m);
+            if m.frame_rate() == 30 {
+                Ok(())
+            } else {
+                Err("Not Found/Rejected/Unsupported")
+            }
+        });
+        assert_eq!(taken, Some(mode(640, 480, FrameFormat::YUYV, 30)));
+        assert_eq!(tried.len(), 2);
+    }
+
+    #[test]
+    fn a_camera_that_refuses_everything_is_left_in_its_own_mode() {
+        let candidates = camera_candidates(&mac_modes());
+        let taken = first_accepted(&candidates, |_| Err::<(), _>("refused"));
+        assert_eq!(taken, None);
     }
 }

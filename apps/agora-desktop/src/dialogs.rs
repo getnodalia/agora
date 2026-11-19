@@ -50,6 +50,13 @@ pub enum Dialog {
         topic: String,
         private: bool,
     },
+    /// Delete a workspace for good. The owner types its name to confirm.
+    DeleteWorkspace {
+        id: WorkspaceId,
+        name: String,
+        typed: String,
+        pending: bool,
+    },
     Invite {
         invite: Option<Invite>,
         uses: u32,
@@ -97,6 +104,7 @@ impl Dialog {
             Dialog::CreateWorkspace { .. } => tr("Create a workspace"),
             Dialog::JoinWorkspace { .. } => tr("Join a workspace"),
             Dialog::CreateChannel { .. } => tr("Create a channel"),
+            Dialog::DeleteWorkspace { .. } => tr("Delete this workspace?"),
             Dialog::Invite { .. } => tr("Invite people"),
             Dialog::NewDirect { .. } => tr("New direct message"),
             Dialog::Topic { .. } => tr("Topic"),
@@ -131,7 +139,11 @@ pub fn show(
     let response = egui::Modal::new(Id::unique("agora-dialog"))
         .frame(frame)
         .show(ctx, |ui| {
-            ui.set_width(380.0);
+            ui.set_width(if matches!(dialog, Dialog::Integrations(_)) {
+                460.0
+            } else {
+                380.0
+            });
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(dialog.title())
@@ -155,12 +167,19 @@ pub fn show(
                 Dialog::Organizations(_) | Dialog::Security(_) | Dialog::Integrations(_)
             ) {
                 let max_height = (ctx.content_rect().height() - 140.0).max(120.0);
-                egui::ScrollArea::vertical()
+                // The body is as tall as it needs, up to the window. egui sizes the scroller from
+                // the previous frame and can come up a few points short, which clips the last
+                // button, so ask for the height the content had.
+                let key = Id::unique("dialog-body-height");
+                let known: f32 = ctx.data(|d| d.get_temp(key)).unwrap_or(0.0);
+                let out = egui::ScrollArea::vertical()
                     .id_salt("organization-dialog-body")
                     .max_height(max_height)
+                    .min_scrolled_height(known.min(max_height))
                     .show(ui, |ui| {
                         body(ui, main, settings, look, &mut dialog, actions, &mut close);
                     });
+                ctx.data_mut(|d| d.insert_temp(key, out.content_size.y));
             } else {
                 body(ui, main, settings, look, &mut dialog, actions, &mut close);
             }
@@ -212,7 +231,11 @@ fn buttons(ui: &mut Ui, look: &Look, confirm: &str, enabled: bool) -> (bool, boo
     out
 }
 
-fn organization_role_label(role: Role) -> &'static str {
+fn members_of(main: &Main, workspace: WorkspaceId) -> usize {
+    main.model.members.get(&workspace).map_or(0, Vec::len)
+}
+
+pub(crate) fn organization_role_label(role: Role) -> &'static str {
     match role {
         Role::Owner => tr("Owner"),
         Role::Admin => tr("Admin"),
@@ -480,13 +503,45 @@ fn body(
             topic,
             private,
         } => {
+            ui.label(
+                RichText::new(tr(
+                    "Channels keep a conversation about one subject in one place.",
+                ))
+                .color(color(p.text_secondary)),
+            );
             label(ui, look, tr("Channel name"));
             field(ui, look, name, true);
+            let checked = agora_core::validate::channel_name(name);
+            let (hint, hint_color) = match &checked {
+                Ok(clean) => (format!("#{clean}"), p.accent_text),
+                Err(_) if name.trim().is_empty() => (
+                    tr("Short and lower case, like design or launch-plan.").to_owned(),
+                    p.text_tertiary,
+                ),
+                Err(_) => (
+                    tr("Use letters, numbers and hyphens, up to 80 characters.").to_owned(),
+                    p.status_danger_fg,
+                ),
+            };
+            ui.label(
+                RichText::new(hint)
+                    .size(font_size::CAPTION)
+                    .color(color(hint_color)),
+            );
             label(ui, look, tr("Topic (optional)"));
             field(ui, look, topic, false);
             ui.add_space(8.0);
             ui.checkbox(private, tr("Private channel"));
-            let ok = agora_core::validate::channel_name(name).is_ok();
+            ui.label(
+                RichText::new(if *private {
+                    tr("Only the people you add can see it and read it.")
+                } else {
+                    tr("Everyone in the workspace can find it and join.")
+                })
+                .size(font_size::CAPTION)
+                .color(color(p.text_tertiary)),
+            );
+            let ok = checked.is_ok();
             let (confirm, cancel) = buttons(ui, look, tr("Create"), ok);
             if ok && confirm {
                 actions.push(Action::CreateChannel {
@@ -494,6 +549,35 @@ fn body(
                     topic: topic.trim().to_string(),
                     private: *private,
                 });
+            }
+            *close |= cancel;
+        }
+        Dialog::DeleteWorkspace {
+            id,
+            name,
+            typed,
+            pending,
+        } => {
+            ui.label(
+                RichText::new(trf(
+                    "{} and everything in it will be deleted for good: every channel, message, file, task and integration, for all {} of its members. This cannot be undone.",
+                    &[name, &members_of(main, *id).to_string()],
+                ))
+                .color(color(p.text_primary)),
+            );
+            label(ui, look, &trf("Type {} to confirm", &[name]));
+            field(ui, look, typed, true);
+            let ok = typed.trim() == name.as_str() && !*pending;
+            ui.add_space(16.0);
+            let mut cancel = false;
+            let mut confirm = false;
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                confirm =
+                    crate::widgets::danger_button(ui, look, tr("Delete workspace"), ok).clicked();
+                cancel = cr::secondary_button(ui, look, tr("Cancel"), true).clicked();
+            });
+            if ok && (confirm || enter) {
+                actions.push(Action::DeleteWorkspace(*id, name.clone()));
             }
             *close |= cancel;
         }
@@ -541,8 +625,16 @@ fn body(
                 });
             }
             None => {
+                ui.label(
+                    RichText::new(tr("Make a code that lets people join this workspace. Each use lets one person in, until the code runs out or expires."))
+                        .color(color(p.text_secondary)),
+                );
                 label(ui, look, tr("Uses"));
-                ui.add(egui::Slider::new(uses, 1..=100));
+                ui.horizontal(|ui| {
+                    for n in [1, 5, 10, 25, 100] {
+                        ui.selectable_value(uses, n, n.to_string());
+                    }
+                });
                 label(ui, look, tr("Expires after"));
                 ui.horizontal(|ui| {
                     for (h, text) in [(24, "24 h"), (168, "7 d"), (720, "30 d")] {
@@ -635,7 +727,16 @@ fn body(
             *close |= cancel;
         }
         Dialog::ConfirmDelete { id } => {
-            let (confirm, cancel) = buttons(ui, look, tr("Delete"), true);
+            ui.label(
+                RichText::new(tr("It disappears for everyone in the conversation, and replies to it keep their place. This cannot be undone."))
+                    .color(color(p.text_secondary)),
+            );
+            ui.add_space(16.0);
+            let (mut confirm, mut cancel) = (false, false);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                confirm = crate::widgets::danger_button(ui, look, tr("Delete"), true).clicked();
+                cancel = cr::secondary_button(ui, look, tr("Cancel"), true).clicked();
+            });
             if confirm {
                 actions.push(Action::Delete(*id));
             }

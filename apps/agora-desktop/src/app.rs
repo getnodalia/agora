@@ -146,6 +146,8 @@ pub enum Action {
     CloseDialog,
     CreateWorkspace(String),
     JoinWorkspace(String),
+    /// Delete a workspace (id, its exact name typed as the confirmation).
+    DeleteWorkspace(WorkspaceId, String),
     CreateChannel {
         name: String,
         topic: String,
@@ -183,6 +185,7 @@ pub enum Action {
     // Sign-in screen.
     CheckServer,
     SignIn,
+    ResetPassword,
 }
 
 impl App {
@@ -474,7 +477,7 @@ impl App {
         let client = match agora_client::parse_server_url(&form.server).and_then(Client::new) {
             Ok(c) => c,
             Err(e) => {
-                form.error = Some(e.to_string());
+                form.error = Some(crate::i18n::explain(&e));
                 return;
             }
         };
@@ -498,6 +501,7 @@ impl App {
             Ok((client, session, secure))
         };
         if form.register {
+            let for_key = password.clone();
             let request = RegisterRequest {
                 username,
                 display_name: form.display_name.trim().to_string(),
@@ -506,10 +510,21 @@ impl App {
             };
             self.net.run(async move {
                 let result = match client.register(&request).await {
-                    Ok((client, session)) => secured(client, session).await,
+                    Ok((client, session)) => {
+                        // A new account gets a recovery key to save right away.
+                        let key = client.new_recovery_key(&for_key).await.ok();
+                        secured(client, session)
+                            .await
+                            .map(|signed| (signed, key.map(|k| k.recovery_key)))
+                    }
                     Err(e) => Err(e),
                 };
-                Reply::SignedIn(result)
+                match result {
+                    Ok(((client, session, secure), key)) => {
+                        Reply::SignedIn(Ok((client, session, secure)), key)
+                    }
+                    Err(e) => Reply::SignedIn(Err(e), None),
+                }
             });
         } else {
             self.net.run(async move {
@@ -523,9 +538,56 @@ impl App {
                     Ok((client, session)) => secured(client, session).await,
                     Err(e) => Err(e),
                 };
-                Reply::SignedIn(result)
+                Reply::SignedIn(result, None)
             });
         }
+    }
+
+    /// Choose a new password with the recovery key (or the administrator's code), and sign in.
+    fn reset_password(&mut self) {
+        let Screen::SignIn(form) = &mut self.screen else {
+            return;
+        };
+        if form.busy {
+            return;
+        }
+        let client = match agora_client::parse_server_url(&form.server).and_then(Client::new) {
+            Ok(c) => c,
+            Err(e) => {
+                form.error = Some(crate::i18n::explain(&e));
+                return;
+            }
+        };
+        form.busy = true;
+        form.error = None;
+        let code = form.code.trim().to_string();
+        let (totp, recovery_code) = match (form.mfa, form.use_recovery) {
+            (false, _) => (None, None),
+            (true, false) => (Some(code), None),
+            (true, true) => (None, Some(code)),
+        };
+        let request = agora_protocol::ResetPasswordRequest {
+            username: form.username.trim().to_lowercase(),
+            code: form.reset_code.trim().to_string(),
+            new_password: form.password.clone(),
+            totp,
+            recovery_code,
+        };
+        let dir = self.dir.clone();
+        self.net.run(async move {
+            let result = async {
+                let (client, session, key) = client.reset_password(&request).await?;
+                let path =
+                    settings::device_path(dir.as_deref(), client.base().as_str(), session.user.id);
+                let secure = Secure::open(&client, session.user.id, path).await?;
+                Ok(((client, session, secure), key))
+            }
+            .await;
+            match result {
+                Ok((signed, key)) => Reply::SignedIn(Ok(signed), Some(key)),
+                Err(e) => Reply::SignedIn(Err(e), None),
+            }
+        });
     }
 
     fn enter(
@@ -627,11 +689,11 @@ impl App {
             Reply::ServerInfo(address, result) => {
                 if let Screen::SignIn(form) = &mut self.screen {
                     if form.info_for == address {
-                        form.info = Some(result.map_err(|e| e.to_string()));
+                        form.info = Some(result.map_err(|e| crate::i18n::explain(&e)));
                     }
                 }
             }
-            Reply::SignedIn(result) => match result {
+            Reply::SignedIn(result, key) => match result {
                 Ok((client, session, secure)) => {
                     if let Screen::SignIn(form) = &self.screen {
                         self.settings.server = form.server.trim().to_string();
@@ -639,6 +701,19 @@ impl App {
                         self.save_settings(now);
                     }
                     self.enter(client, secure, session.user, Some(session.token), now);
+                    if let (Some(key), Screen::Main(main)) = (key, &mut self.screen) {
+                        // Shown once, right after the account is made or the password reset.
+                        let mut dialog = crate::security::SecurityDialog {
+                            stage: crate::security::Stage::Key(key),
+                            ..Default::default()
+                        };
+                        dialog.act(
+                            &self.net,
+                            &main.client,
+                            crate::security::SecurityAction::Load,
+                        );
+                        main.dialog = Some(dialogs::Dialog::Security(dialog));
+                    }
                 }
                 Err(e) => {
                     if let Screen::SignIn(form) = &mut self.screen {
@@ -651,8 +726,10 @@ impl App {
                             form.mfa = true;
                             form.code.clear();
                         } else {
-                            form.error = Some(e.to_string());
-                            form.password.clear();
+                            form.error = Some(crate::i18n::explain(&e));
+                            if !form.recover {
+                                form.password.clear();
+                            }
                         }
                     }
                 }
@@ -664,7 +741,7 @@ impl App {
                 }
                 Err(e) => {
                     let mut form = signin::Form::new(&self.settings);
-                    form.error = Some(e.to_string());
+                    form.error = Some(crate::i18n::explain(&e));
                     self.screen = Screen::SignIn(form);
                 }
             },
@@ -682,7 +759,7 @@ impl App {
                     if e.is_unauthenticated() {
                         self.sign_out(Some(tr("Signed out. Sign in again.")));
                     } else {
-                        self.toast(e.to_string(), now);
+                        self.toast(crate::i18n::explain(&e), now);
                     }
                 }
             }
@@ -696,6 +773,7 @@ impl App {
             match action {
                 Action::CheckServer => self.check_server(),
                 Action::SignIn => self.sign_in(),
+                Action::ResetPassword => self.reset_password(),
                 Action::Copy(text) => {
                     ctx.copy_text(text);
                     self.toast(tr("Copied."), now);
@@ -803,6 +881,22 @@ impl Main {
                     self.model.workspaces.push(ws);
                 }
                 self.select_workspace(net, id);
+            }
+            Reply::WorkspaceDeleted(id, result) => {
+                if let Err(e) = result {
+                    if let Some(dialogs::Dialog::DeleteWorkspace { pending, .. }) = &mut self.dialog
+                    {
+                        *pending = false;
+                    }
+                    return Err(e);
+                }
+                if matches!(&self.dialog, Some(dialogs::Dialog::DeleteWorkspace { id: open, .. }) if *open == id)
+                {
+                    self.dialog = None;
+                }
+                self.model.remove_workspace(id);
+                let client = self.client.clone();
+                net.run(async move { Reply::Workspaces(client.workspaces().await) });
             }
             Reply::Channels(ws, result) => {
                 self.model.set_channels(ws, result?);
@@ -1006,7 +1100,8 @@ impl Main {
             Reply::NotificationUnavailable => self
                 .notices
                 .push(tr("The system notification service is unavailable.").to_owned()),
-            Reply::ServerInfo(..) | Reply::SignedIn(_) | Reply::Restored(_) | Reply::LoggedOut => {}
+            Reply::ServerInfo(..) | Reply::SignedIn(..) | Reply::Restored(_) | Reply::LoggedOut => {
+            }
         }
         Ok(())
     }
@@ -1146,7 +1241,7 @@ impl Main {
             Err(e) => {
                 if joining && self.joining == Some(channel) {
                     self.joining = None;
-                    self.notices.push(e.to_string());
+                    self.notices.push(crate::i18n::explain(&e));
                 }
                 return;
             }
@@ -1540,7 +1635,13 @@ impl Main {
                         .model
                         .current_workspace()
                         .is_some_and(|w| w.role.is_admin());
-                let mut dialog = crate::integrations::IntegrationsDialog::new(channel, admin);
+                let channel_name = self
+                    .model
+                    .channel_info(channel)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                let mut dialog =
+                    crate::integrations::IntegrationsDialog::new(channel, admin, &channel_name);
                 dialog.act(
                     net,
                     &self.client,
@@ -1805,6 +1906,15 @@ impl Main {
                     async move { Reply::WorkspaceOpened(client.create_workspace(&name).await) },
                 );
             }
+            Action::DeleteWorkspace(id, name) => {
+                if let Some(dialogs::Dialog::DeleteWorkspace { pending, .. }) = &mut self.dialog {
+                    *pending = true;
+                }
+                let client = self.client.clone();
+                net.run(async move {
+                    Reply::WorkspaceDeleted(id, client.delete_workspace(id, &name).await)
+                });
+            }
             Action::JoinWorkspace(code) => {
                 let client = self.client.clone();
                 net.run(
@@ -1932,7 +2042,8 @@ impl Main {
             | Action::FocusSearch
             | Action::Quit
             | Action::CheckServer
-            | Action::SignIn => {}
+            | Action::SignIn
+            | Action::ResetPassword => {}
         }
     }
 

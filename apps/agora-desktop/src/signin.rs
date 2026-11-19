@@ -30,6 +30,10 @@ pub struct Form {
     pub code: String,
     /// Typing a recovery code instead of an authenticator code.
     pub use_recovery: bool,
+    /// Choosing a new password with a recovery key instead of signing in.
+    pub recover: bool,
+    /// The recovery key (or the server administrator's code) typed in that mode.
+    pub reset_code: String,
 }
 
 impl Form {
@@ -49,6 +53,8 @@ impl Form {
             mfa: false,
             code: String::new(),
             use_recovery: false,
+            recover: false,
+            reset_code: String::new(),
         }
     }
 }
@@ -72,7 +78,7 @@ pub fn show(ui: &mut Ui, app: &mut App) -> Vec<Action> {
 
     let mut remember = app.settings.remember;
     let card_width = 380.0;
-    let tall = matches!(&app.screen, Screen::SignIn(form) if form.register);
+    let tall = matches!(&app.screen, Screen::SignIn(form) if form.register || form.recover);
     let card_height = if tall { 720.0 } else { 600.0 };
     let body = egui::Rect::from_min_max(egui::pos2(full.left(), bar.bottom()), full.max);
     ui.scope_builder(UiBuilder::new().max_rect(body), |ui| {
@@ -134,6 +140,8 @@ fn form_card(
             ui.add_space(8.0);
             let title = if form.register {
                 tr("Create an account")
+            } else if form.recover {
+                tr("Reset your password")
             } else {
                 tr("Sign in to Ágora")
             };
@@ -143,8 +151,13 @@ fn form_card(
                     .strong()
                     .color(color(p.text_primary)),
             );
+            let tagline = if form.recover {
+                tr("Use the recovery key you saved, or a code from whoever runs this server.")
+            } else {
+                tr("Open source, self-hosted team chat.")
+            };
             ui.label(
-                RichText::new(tr("Open source, self-hosted team chat."))
+                RichText::new(tagline)
                     .size(font_size::SMALL)
                     .color(color(p.text_secondary)),
             );
@@ -168,8 +181,39 @@ fn form_card(
         }
         field_label(ui, look, tr("Username"));
         field(ui, look, &mut form.username, "", false);
-        field_label(ui, look, tr("Password"));
+        if form.recover {
+            field_label(ui, look, tr("Recovery key or code"));
+            field(ui, look, &mut form.reset_code, "", false);
+        }
+        field_label(
+            ui,
+            look,
+            if form.recover {
+                tr("New password")
+            } else {
+                tr("Password")
+            },
+        );
         let password = field(ui, look, &mut form.password, "", true);
+        if !form.register && !form.recover {
+            ui.add_space(4.0);
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                if ui
+                    .link(
+                        RichText::new(tr("Forgot your password?"))
+                            .size(font_size::SMALL)
+                            .color(color(p.accent_text)),
+                    )
+                    .clicked()
+                {
+                    form.recover = true;
+                    form.error = None;
+                    form.mfa = false;
+                    form.code.clear();
+                    form.password.clear();
+                }
+            });
+        }
         if form.register {
             field_label(ui, look, tr("Invitation code (if you have one)"));
             field(ui, look, &mut form.invite, "", false);
@@ -222,9 +266,12 @@ fn form_card(
             && !form.username.trim().is_empty()
             && !form.password.is_empty()
             && (!form.register || !form.display_name.trim().is_empty())
-            && (!form.mfa || form.register || !form.code.trim().is_empty());
+            && (!form.mfa || form.register || !form.code.trim().is_empty())
+            && (!form.recover || !form.reset_code.trim().is_empty());
         let label = if form.register {
             tr("Create account")
+        } else if form.recover {
+            tr("Choose new password")
         } else {
             tr("Sign in")
         };
@@ -233,14 +280,18 @@ fn form_card(
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             let button = cr::primary_button_min(ui, look, label, ready, width - 48.0);
             if (button.clicked() || submitted) && ready {
-                actions.push(Action::SignIn);
+                actions.push(if form.recover {
+                    Action::ResetPassword
+                } else {
+                    Action::SignIn
+                });
             }
             if form.busy {
                 ui.add_space(6.0);
                 ui.spinner();
             }
             ui.add_space(8.0);
-            let switch = if form.register {
+            let switch = if form.register || form.recover {
                 tr("Back to sign in")
             } else {
                 tr("Create an account")
@@ -249,10 +300,12 @@ fn form_card(
                 .link(RichText::new(switch).color(color(p.accent_text)))
                 .clicked()
             {
-                form.register = !form.register;
+                form.register = !form.register && !form.recover;
+                form.recover = false;
                 form.error = None;
                 form.mfa = false;
                 form.code.clear();
+                form.reset_code.clear();
             }
         });
     });
@@ -297,13 +350,7 @@ fn field_label(ui: &mut Ui, look: &Look, text: &str) {
     );
 }
 
-fn field(
-    ui: &mut Ui,
-    look: &Look,
-    text: &mut String,
-    hint: &str,
-    password: bool,
-) -> egui::Response {
+fn field(ui: &mut Ui, look: &Look, text: &mut String, hint: &str, hidden: bool) -> egui::Response {
     cr::field_frame(look)
         .inner_margin(egui::Margin::symmetric(8, 0))
         .show(ui, |ui| {
@@ -312,7 +359,7 @@ fn field(
                     .frame(egui::Frame::NONE)
                     .align(egui::Align2::LEFT_CENTER)
                     .hint_text(hint)
-                    .password(password)
+                    .password(hidden)
                     .desired_width(ui.available_width()),
             )
         })

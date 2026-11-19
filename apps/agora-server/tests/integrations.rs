@@ -259,3 +259,126 @@ async fn only_admins_manage_and_only_readers_see() {
     assert_eq!(empty.code(), Some(ErrorCode::Invalid));
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_admin_can_send_a_test_notice_and_nobody_else_can() {
+    let (_dir, db) = temp_db("integrations-test-notice");
+    let server = Server::start(&db).await;
+    let (ana, luis, _eva, ws) = team(&server).await;
+    let general = ana.channels(ws.id).await.unwrap()[0].clone();
+    let created = ana
+        .create_integration(
+            general.id,
+            &CreateIntegrationRequest {
+                kind: IntegrationKind::Hito,
+                name: "Lanzamiento".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let id = created.integration.id;
+    let stranger = Person::register(&server, "marta").await;
+
+    assert_eq!(
+        luis.test_integration(id).await.unwrap_err().code(),
+        Some(ErrorCode::Forbidden)
+    );
+    assert_eq!(
+        stranger.test_integration(id).await.unwrap_err().code(),
+        Some(ErrorCode::NotFound)
+    );
+    assert!(luis.notices(general.id).await.unwrap().is_empty());
+
+    let mut live = Live::open(&luis);
+    live.ready().await;
+    ana.test_integration(id).await.unwrap();
+    let seen = live
+        .server_event(|e| match e {
+            agora_protocol::ServerEvent::IntegrationNotice { notice } => Some(notice.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(seen.integration_id, id);
+    assert_eq!(seen.title.as_deref(), Some("Test notice"));
+    // Testing twice shows two notices: each test is its own.
+    ana.test_integration(id).await.unwrap();
+    assert_eq!(luis.notices(general.id).await.unwrap().len(), 2);
+    server.stop().await;
+}
+
+async fn github_post(url: &str, event: &str, signature: &str, body: &str) -> StatusCode {
+    reqwest::Client::new()
+        .post(url)
+        .header("x-hub-signature-256", signature)
+        .header("x-github-event", event)
+        .header("content-type", "application/json")
+        .body(body.to_owned())
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn a_github_delivery_becomes_a_readable_notice() {
+    let (_dir, db) = temp_db("integrations-github");
+    let server = Server::start(&db).await;
+    let (ana, luis, _eva, ws) = team(&server).await;
+    let general = ana.channels(ws.id).await.unwrap()[0].clone();
+    let created = ana
+        .create_integration(
+            general.id,
+            &CreateIntegrationRequest {
+                kind: IntegrationKind::GitHub,
+                name: "acme/app".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let url = ana.hook_url(&created);
+
+    // GitHub's own header and event name, no Ágora-specific payload.
+    let ping = r#"{"zen":"Keep it logically awesome.","repository":{"full_name":"acme/app"}}"#;
+    let sig = sign(ping, &created.secret);
+    assert_eq!(
+        github_post(&url, "ping", &sig, ping).await,
+        StatusCode::ACCEPTED
+    );
+    // GitHub's default content type: the JSON wrapped in a form field.
+    let form = "payload=%7B%22repository%22%3A%7B%22full_name%22%3A%22acme%2Fapp%22%7D%7D";
+    let response = reqwest::Client::new()
+        .post(&url)
+        .header("x-hub-signature-256", sign(form, &created.secret))
+        .header("x-github-event", "ping")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let push = r#"{"ref":"refs/heads/main","size":1,"repository":{"full_name":"acme/app"},"pusher":{"name":"ana"},"commits":[{"message":"Fix login"}]}"#;
+    let sig = sign(push, &created.secret);
+    assert_eq!(
+        github_post(&url, "push", &sig, push).await,
+        StatusCode::ACCEPTED
+    );
+    // A wrong signature changes nothing; an event nobody reads is accepted and dropped.
+    assert_eq!(
+        github_post(&url, "push", &sign(push, "nope"), push).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let star = r#"{"action":"created","repository":{"full_name":"acme/app"}}"#;
+    assert_eq!(
+        github_post(&url, "star", &sign(star, &created.secret), star).await,
+        StatusCode::ACCEPTED
+    );
+
+    let notices = luis.notices(general.id).await.unwrap();
+    assert_eq!(notices.len(), 3);
+    assert!(notices[0].text.starts_with("GitHub is connected"));
+    assert!(notices[1].text.starts_with("GitHub is connected"));
+    assert_eq!(notices[2].text, "ana pushed 1 commit to main\n• Fix login");
+    assert_eq!(notices[2].title.as_deref(), Some("acme/app"));
+    assert_eq!(notices[2].kind, IntegrationKind::GitHub);
+    server.stop().await;
+}

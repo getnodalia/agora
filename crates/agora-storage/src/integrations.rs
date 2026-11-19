@@ -24,6 +24,7 @@ pub struct NewNotice<'a> {
 fn kind_of(s: &str) -> IntegrationKind {
     match s {
         "hito" => IntegrationKind::Hito,
+        "github" => IntegrationKind::GitHub,
         _ => IntegrationKind::Webhook,
     }
 }
@@ -32,6 +33,7 @@ fn kind_str(kind: IntegrationKind) -> &'static str {
     match kind {
         IntegrationKind::Hito => "hito",
         IntegrationKind::Webhook => "webhook",
+        IntegrationKind::GitHub => "github",
     }
 }
 

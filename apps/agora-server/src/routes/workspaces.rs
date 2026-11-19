@@ -115,6 +115,51 @@ pub async fn get_one(
     Ok(Json(ws))
 }
 
+#[derive(serde::Deserialize)]
+pub struct DeleteQuery {
+    /// The workspace's exact name, typed by the owner as the confirmation.
+    #[serde(default)]
+    confirm: String,
+}
+
+/// Delete a workspace and everything in it. Only the owner may, and only after typing its name:
+/// the loss is permanent and reaches every member.
+pub async fn delete(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+    axum::extract::Query(query): axum::extract::Query<DeleteQuery>,
+) -> AppResult<StatusCode> {
+    let ws = WorkspaceId(id);
+    let role = workspace_role(&state, ws, auth.user.id).await?;
+    if role != Role::Owner {
+        return Err(AppError::forbidden(
+            "only the workspace owner can delete it",
+        ));
+    }
+    super::check_write(&state, auth.user.id)?;
+    let workspace = state
+        .store
+        .workspace(ws, auth.user.id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    if query.confirm.trim() != workspace.name {
+        return Err(AppError::invalid(
+            "type the workspace's name exactly to confirm deleting it",
+        ));
+    }
+    // Members are read first: nobody is left to ask once the rows are gone.
+    let audience = state.store.workspace_member_ids(ws).await?;
+    if state.store.delete_workspace(ws).await? {
+        tracing::info!(workspace = id, user = auth.user.id.0, "workspace deleted");
+        state.hub.send(
+            &audience,
+            &ServerEvent::WorkspaceRemoved { workspace_id: ws },
+        );
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn create(
     State(state): State<AppState>,
     auth: Auth,

@@ -430,3 +430,99 @@ async fn invited_registration_is_atomic() {
     ));
     assert!(s.user_credentials("unknown").await.unwrap().is_none());
 }
+
+/// Migration 0014 rebuilds the integration tables to allow GitHub: what was stored survives,
+/// the notices still hang off their integration, and the new kind is accepted.
+#[tokio::test]
+async fn the_github_migration_keeps_integrations_and_their_notices() {
+    use sqlx::migrate::Migrator;
+    use sqlx::Row;
+    use std::borrow::Cow;
+
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .in_memory(true)
+        .foreign_keys(false);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let before: Vec<_> = MIGRATOR
+        .migrations
+        .iter()
+        .filter(|m| m.version < 14)
+        .cloned()
+        .collect();
+    let old = Migrator {
+        migrations: Cow::Owned(before),
+        ..Migrator::DEFAULT
+    };
+    old.run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO integrations (id, channel_id, kind, name, secret, created_by, created_at)
+         VALUES (7, 1, 'hito', 'Hito in #general', zeroblob(32), 1, 5)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO integration_notices
+            (id, integration_id, channel_id, payload_hash, title, text, url, created_at)
+         VALUES (9, 7, 1, zeroblob(32), 'Web', 'Done', NULL, 6)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let name: String = sqlx::query_scalar("SELECT name FROM integrations WHERE id = 7")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(name, "Hito in #general");
+    let text: String = sqlx::query_scalar("SELECT text FROM integration_notices WHERE id = 9")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(text, "Done");
+    sqlx::query(
+        "INSERT INTO integrations (id, channel_id, kind, name, secret, created_by, created_at)
+         VALUES (8, 1, 'github', 'GitHub', zeroblob(32), 1, 5)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(sqlx::query(
+        "INSERT INTO integrations (id, channel_id, kind, name, secret, created_by, created_at)
+         VALUES (10, 1, 'nope', 'x', zeroblob(32), 1, 5)",
+    )
+    .execute(&pool)
+    .await
+    .is_err());
+    // The notices refer to the table by its final name, so deleting an integration removes them.
+    let schema: String = sqlx::query(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'integration_notices'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        schema.contains("REFERENCES \"integrations\"(id)") && !schema.contains("integrations_new"),
+        "{schema}"
+    );
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM integrations WHERE id = 7")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM integration_notices")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}

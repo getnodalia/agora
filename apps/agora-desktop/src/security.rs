@@ -4,7 +4,7 @@
 //! keeps the dialog's state, draws it and starts requests.
 
 use agora_client::Client;
-use agora_protocol::{MfaSetup, MfaStatus, OwnDevice};
+use agora_protocol::{MfaSetup, MfaStatus, OwnDevice, RecoveryStatus};
 use egui::{vec2, Align, Layout, RichText, Sense, TextEdit, Ui};
 use nodalia_theme::creator::{self as cr, Look};
 use nodalia_theme::font_size;
@@ -30,14 +30,22 @@ pub enum Stage {
     Disable,
     /// Asking a code for new recovery codes.
     NewCodes,
+    /// Asking the old and the new password.
+    ChangePassword,
+    /// Asking the password before a new recovery key is made.
+    KeyPassword,
+    /// A recovery key, shown once.
+    Key(String),
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct SecurityDialog {
     pub status: Option<MfaStatus>,
+    pub recovery: Option<RecoveryStatus>,
     pub devices: Vec<OwnDevice>,
     pub stage: Stage,
     pub password: String,
+    pub new_password: String,
     pub code: String,
     pub pending: bool,
     pub error: Option<String>,
@@ -51,6 +59,8 @@ pub enum SecurityAction {
     Enable,
     Disable,
     NewCodes,
+    ChangePassword,
+    NewKey,
     RemoveDevice(String),
     Stage(Stage),
 }
@@ -58,9 +68,10 @@ pub enum SecurityAction {
 /// What a request answered.
 #[derive(Debug)]
 pub enum SecurityReply {
-    Loaded(Result<(MfaStatus, Vec<OwnDevice>)>),
+    Loaded(Result<(MfaStatus, RecoveryStatus, Vec<OwnDevice>)>),
     Setup(Result<MfaSetup>),
     Codes(Result<Vec<String>>),
+    Key(Result<String>),
     Done(Result<()>),
 }
 
@@ -70,6 +81,7 @@ impl SecurityDialog {
         if let SecurityAction::Stage(stage) = action {
             self.stage = stage;
             self.password.clear();
+            self.new_password.clear();
             self.code.clear();
             self.error = None;
             return;
@@ -81,11 +93,18 @@ impl SecurityDialog {
         self.error = None;
         let client = client.clone();
         let password = std::mem::take(&mut self.password);
+        let new_password = std::mem::take(&mut self.new_password);
         let code = std::mem::take(&mut self.code);
         match action {
             SecurityAction::Load => net.run(async move {
-                let result =
-                    async { Ok((client.mfa_status().await?, client.own_devices().await?)) }.await;
+                let result = async {
+                    Ok((
+                        client.mfa_status().await?,
+                        client.recovery_status().await?,
+                        client.own_devices().await?,
+                    ))
+                }
+                .await;
                 Reply::Security(SecurityReply::Loaded(result))
             }),
             SecurityAction::Setup => net.run(async move {
@@ -107,6 +126,15 @@ impl SecurityDialog {
                     client.mfa_disable(&password, &code).await,
                 ))
             }),
+            SecurityAction::ChangePassword => net.run(async move {
+                Reply::Security(SecurityReply::Done(
+                    client.change_password(&password, &new_password).await,
+                ))
+            }),
+            SecurityAction::NewKey => net.run(async move {
+                let result = client.new_recovery_key(&password).await;
+                Reply::Security(SecurityReply::Key(result.map(|k| k.recovery_key)))
+            }),
             SecurityAction::RemoveDevice(key) => net.run(async move {
                 Reply::Security(SecurityReply::Done(client.remove_device(&key).await))
             }),
@@ -118,8 +146,9 @@ impl SecurityDialog {
     pub fn answer(&mut self, reply: SecurityReply) -> bool {
         self.pending = false;
         match reply {
-            SecurityReply::Loaded(Ok((status, devices))) => {
+            SecurityReply::Loaded(Ok((status, recovery, devices))) => {
                 self.status = Some(status);
+                self.recovery = Some(recovery);
                 self.devices = devices;
                 false
             }
@@ -131,6 +160,10 @@ impl SecurityDialog {
                 self.stage = Stage::Codes(codes);
                 true
             }
+            SecurityReply::Key(Ok(key)) => {
+                self.stage = Stage::Key(key);
+                true
+            }
             SecurityReply::Done(Ok(())) => {
                 self.stage = Stage::Overview;
                 true
@@ -138,6 +171,7 @@ impl SecurityDialog {
             SecurityReply::Loaded(Err(e))
             | SecurityReply::Setup(Err(e))
             | SecurityReply::Codes(Err(e))
+            | SecurityReply::Key(Err(e))
             | SecurityReply::Done(Err(e)) => {
                 self.error = Some(describe(&e));
                 false
@@ -154,7 +188,7 @@ fn describe(e: &agora_client::ClientError) -> String {
             tr("That code is not valid. Check the time on this computer and try again.").to_string()
         }
         Some(ErrorCode::RateLimited) => tr("Too many attempts. Wait a minute.").to_string(),
-        _ => e.to_string(),
+        _ => crate::i18n::explain(e),
     }
 }
 
@@ -168,6 +202,32 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
     }
     match dialog.stage.clone() {
         Stage::Overview => {
+            heading(ui, look, tr("Password and recovery"));
+            let has_key = dialog.recovery.as_ref().is_some_and(|r| r.has_key);
+            note(
+                ui,
+                look,
+                if has_key {
+                    tr("You have a recovery key. If you forget your password, it lets you choose a new one from the sign-in screen.")
+                } else {
+                    tr("You have no recovery key yet. Without one, only whoever runs this server can help you if you forget your password.")
+                },
+            );
+            ui.horizontal(|ui| {
+                if cr::secondary_button(ui, look, tr("Change password"), !dialog.pending).clicked()
+                {
+                    act(SecurityAction::Stage(Stage::ChangePassword));
+                }
+                let key_label = if has_key {
+                    tr("New recovery key")
+                } else {
+                    tr("Create a recovery key")
+                };
+                if cr::secondary_button(ui, look, key_label, !dialog.pending).clicked() {
+                    act(SecurityAction::Stage(Stage::KeyPassword));
+                }
+            });
+            ui.add_space(12.0);
             heading(ui, look, tr("Two-step verification"));
             match &dialog.status {
                 None => {
@@ -261,7 +321,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
         Stage::SetupPassword => {
             note(ui, look, tr("Enter your password to continue."));
             label(ui, look, tr("Password"));
-            let enter = field(ui, look, &mut dialog.password, true);
+            let enter = field(ui, look, &mut dialog.password, Input::Secret);
             let ready = !dialog.password.is_empty() && !dialog.pending;
             if footer(ui, look, tr("Continue"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::Setup);
@@ -286,7 +346,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 }
             });
             label(ui, look, tr("Code from your authenticator app"));
-            let enter = field(ui, look, &mut dialog.code, false);
+            let enter = field(ui, look, &mut dialog.code, Input::Plain);
             let ready = dialog.code.trim().len() >= 6 && !dialog.pending;
             if footer(ui, look, tr("Turn on"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::Enable);
@@ -326,14 +386,80 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 tr("Enter your password and a current code to turn two-step verification off."),
             );
             label(ui, look, tr("Password"));
-            field(ui, look, &mut dialog.password, true);
+            field(ui, look, &mut dialog.password, Input::Secret);
             label(ui, look, tr("Code from your authenticator app"));
-            let enter = field(ui, look, &mut dialog.code, false);
+            let enter = field(ui, look, &mut dialog.code, Input::Plain);
             let ready =
                 !dialog.password.is_empty() && dialog.code.trim().len() >= 6 && !dialog.pending;
             if footer(ui, look, tr("Turn off"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::Disable);
             }
+        }
+        Stage::ChangePassword => {
+            note(
+                ui,
+                look,
+                tr("Other computers and sessions are signed out when you change it. Your conversations stay readable."),
+            );
+            label(ui, look, tr("Current password"));
+            field(ui, look, &mut dialog.password, Input::Secret);
+            label(ui, look, tr("New password"));
+            let enter = field(ui, look, &mut dialog.new_password, Input::Secret);
+            let ready = !dialog.password.is_empty()
+                && dialog.new_password.chars().count() >= agora_core::limits::PASSWORD_MIN
+                && !dialog.pending;
+            ui.label(
+                RichText::new(trf(
+                    "At least {} characters.",
+                    &[&agora_core::limits::PASSWORD_MIN.to_string()],
+                ))
+                .size(font_size::CAPTION)
+                .color(color(p.text_tertiary)),
+            );
+            if footer(ui, look, tr("Change password"), ready, &mut act) || (enter && ready) {
+                act(SecurityAction::ChangePassword);
+            }
+        }
+        Stage::KeyPassword => {
+            note(
+                ui,
+                look,
+                tr("Enter your password to make a new recovery key. The old one stops working."),
+            );
+            label(ui, look, tr("Password"));
+            let enter = field(ui, look, &mut dialog.password, Input::Secret);
+            let ready = !dialog.password.is_empty() && !dialog.pending;
+            if footer(ui, look, tr("Continue"), ready, &mut act) || (enter && ready) {
+                act(SecurityAction::NewKey);
+            }
+        }
+        Stage::Key(key) => {
+            note(
+                ui,
+                look,
+                tr("This is your recovery key. If you forget your password, choose “Forgot your password?” on the sign-in screen and enter it. Keep it somewhere safe, apart from your password. It is shown only now."),
+            );
+            cr::island(look).inner_margin(12).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new(key.replace('-', " "))
+                            .monospace()
+                            .size(font_size::BODY)
+                            .strong()
+                            .color(color(p.text_primary)),
+                    );
+                });
+            });
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if cr::secondary_button(ui, look, tr("Copy"), true).clicked() {
+                    actions.push(Action::Copy(key.clone()));
+                }
+                if cr::primary_button(ui, look, tr("I have saved it"), true).clicked() {
+                    act(SecurityAction::Stage(Stage::Overview));
+                }
+            });
         }
         Stage::NewCodes => {
             note(
@@ -342,7 +468,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 tr("Enter a current code. Your old recovery codes stop working."),
             );
             label(ui, look, tr("Code from your authenticator app"));
-            let enter = field(ui, look, &mut dialog.code, false);
+            let enter = field(ui, look, &mut dialog.code, Input::Plain);
             let ready = dialog.code.trim().len() >= 6 && !dialog.pending;
             if footer(ui, look, tr("Continue"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::NewCodes);
@@ -384,7 +510,14 @@ fn label(ui: &mut Ui, look: &Look, text: &str) {
 }
 
 /// A one-line field. `true` when Enter was pressed in it.
-fn field(ui: &mut Ui, look: &Look, text: &mut String, password: bool) -> bool {
+/// Whether a field hides what is typed in it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Input {
+    Plain,
+    Secret,
+}
+
+fn field(ui: &mut Ui, look: &Look, text: &mut String, input: Input) -> bool {
     let response = cr::field_frame(look)
         .inner_margin(egui::Margin::symmetric(8, 0))
         .show(ui, |ui| {
@@ -392,7 +525,7 @@ fn field(ui: &mut Ui, look: &Look, text: &mut String, password: bool) -> bool {
                 TextEdit::singleline(text)
                     .frame(egui::Frame::NONE)
                     .align(egui::Align2::LEFT_CENTER)
-                    .password(password)
+                    .password(input == Input::Secret)
                     .desired_width(ui.available_width()),
             )
         })

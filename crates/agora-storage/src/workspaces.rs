@@ -97,6 +97,17 @@ impl Store {
         Ok(WorkspaceId(id))
     }
 
+    /// Delete a workspace with everything in it: channels, messages, files, tasks, invitations,
+    /// integrations and encrypted logs all go through the foreign keys' `ON DELETE CASCADE`.
+    /// Returns whether a workspace existed.
+    pub async fn delete_workspace(&self, id: WorkspaceId) -> Result<bool> {
+        let done = sqlx::query("DELETE FROM workspaces WHERE id = ?")
+            .bind(id.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
     pub async fn workspaces_of(&self, user: UserId) -> Result<Vec<Workspace>> {
         let rows = sqlx::query(
             "SELECT w.id, w.name, w.created_at, m.role FROM workspaces w

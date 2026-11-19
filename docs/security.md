@@ -168,6 +168,25 @@ The server logs events with ids (`account created user=2`), never passwords, tok
 codes, keys or message text (which it does not have). At `debug` level the HTTP trace prints request paths, which include search
 terms; keep production at `info` (the default).
 
+## Forgotten passwords
+
+Nothing needs email, so a server can run offline. There are two ways back into an account:
+
+- **A recovery key** the person makes in Security and devices (new accounts are offered one
+  right away). It is 160 random bits, shown once and stored only as a SHA-256 bound to the
+  account. On the sign-in screen, "Forgot your password?" takes the username, the key and a new
+  password. A used key stops working and the reset hands out a replacement.
+- **A one-use code from whoever runs the server**: `agora-server reset-password USERNAME`
+  prints one, valid for an hour. `--remove-two-step` also turns the account's second factor off.
+
+A reset signs out every session of the account. An account with two-step verification still
+needs a code from the authenticator (or one of its recovery codes) with the recovery key; only
+the operator's code can lift it, because the operator already controls the server. Attempts are
+rate-limited per address and per username, and a wrong code, an expired one and an unknown
+account all answer the same. The device's encryption keys do not depend on the password, so a
+reset does not lose anyone's conversations. People can also change their password while signed
+in (it asks the old one and signs out the other sessions).
+
 ## Two-step verification
 
 An account can turn on a second factor: a six-digit TOTP code from any authenticator app
@@ -194,7 +213,7 @@ device and deletes its keys and decrypted text from the computer.
 
 ## Known limits
 
-- No password reset by email or account deletion yet. Two-step verification (TOTP) is optional
+- No password reset by email (see "Forgotten passwords") or account deletion yet. Two-step verification (TOTP) is optional
   per account; a server-wide requirement for it does not exist yet.
 - Rate limits are kept in memory per server process.
 - A server administrator can see metadata and could try to add a device: see "End-to-end

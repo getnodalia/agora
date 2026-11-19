@@ -10,6 +10,7 @@ pub mod integrations;
 pub mod messages;
 pub mod mfa;
 pub mod organizations;
+pub mod recovery;
 pub mod tasks;
 pub mod workspaces;
 
@@ -43,6 +44,12 @@ pub fn router() -> Router<AppState> {
             "/auth/sessions/revoke-others",
             post(accounts::revoke_other_sessions),
         )
+        .route("/auth/password", post(recovery::change_password))
+        .route("/auth/password-reset", post(recovery::reset))
+        .route(
+            "/auth/recovery-key",
+            get(recovery::status).post(recovery::create_key),
+        )
         .route("/auth/mfa", get(mfa::status))
         .route("/auth/mfa/setup", post(mfa::setup))
         .route("/auth/mfa/enable", post(mfa::enable))
@@ -71,7 +78,10 @@ pub fn router() -> Router<AppState> {
             get(workspaces::list).post(workspaces::create),
         )
         .route("/workspaces/join", post(workspaces::join))
-        .route("/workspaces/{id}", get(workspaces::get_one))
+        .route(
+            "/workspaces/{id}",
+            get(workspaces::get_one).delete(workspaces::delete),
+        )
         .route(
             "/workspaces/{id}/icon",
             get(workspaces::get_icon)
@@ -112,6 +122,7 @@ pub fn router() -> Router<AppState> {
             get(integrations::list).post(integrations::create),
         )
         .route("/integrations/{id}", delete(integrations::delete))
+        .route("/integrations/{id}/test", post(integrations::test))
         .route("/channels/{id}/notices", get(integrations::notices))
         .route("/channels/{id}/mls", get(e2e::state))
         .route("/channels/{id}/mls/group", post(e2e::create_group))
