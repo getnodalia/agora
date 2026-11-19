@@ -350,13 +350,7 @@ fn field_label(ui: &mut Ui, look: &Look, text: &str) {
     );
 }
 
-fn field(
-    ui: &mut Ui,
-    look: &Look,
-    text: &mut String,
-    hint: &str,
-    password: bool,
-) -> egui::Response {
+fn field(ui: &mut Ui, look: &Look, text: &mut String, hint: &str, hidden: bool) -> egui::Response {
     cr::field_frame(look)
         .inner_margin(egui::Margin::symmetric(8, 0))
         .show(ui, |ui| {
@@ -365,7 +359,7 @@ fn field(
                     .frame(egui::Frame::NONE)
                     .align(egui::Align2::LEFT_CENTER)
                     .hint_text(hint)
-                    .password(password)
+                    .password(hidden)
                     .desired_width(ui.available_width()),
             )
         })
