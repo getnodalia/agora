@@ -5,7 +5,8 @@ use std::net::SocketAddr;
 
 use agora_core::{ChannelId, ChannelKind};
 use agora_protocol::{
-    CreateIntegrationRequest, CreatedIntegration, Integration, IntegrationNotice, ServerEvent,
+    CreateIntegrationRequest, CreatedIntegration, Integration, IntegrationKind, IntegrationNotice,
+    ServerEvent,
 };
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
@@ -19,10 +20,13 @@ use super::{channel_access, client_ip, ChannelAccess};
 use crate::auth::{now_ms, Auth};
 use crate::error::{AppError, AppResult};
 use crate::integrations::github::verify_signature;
+use crate::integrations::github_events;
 use crate::state::AppState;
 
 /// The largest request an integration can send.
-pub const BODY_MAX: usize = 64 * 1024;
+/// GitHub deliveries carry whole commit lists, so the limit is GitHub's own (25 MB is its cap;
+/// 1 MiB is plenty for what is read).
+pub const BODY_MAX: usize = 1024 * 1024;
 const NAME_MAX: usize = 60;
 const TITLE_MAX: usize = 200;
 const TEXT_MAX: usize = 2_000;
@@ -187,7 +191,8 @@ struct Project {
 }
 
 /// Receive a notice. The signature is HMAC-SHA256 of the raw body, keyed with the integration's
-/// secret as the hex text it was shown as, in `X-Agora-Signature` or Hito's `X-Hito-Signature`, as `sha256=<hex>`.
+/// secret as the hex text it was shown as, in `X-Agora-Signature`, Hito's `X-Hito-Signature` or GitHub's `X-Hub-Signature-256`, as `sha256=<hex>`.
+/// A GitHub integration reads the event from `X-GitHub-Event` and posts a summary of it.
 pub async fn receive(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -208,6 +213,7 @@ pub async fn receive(
     let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
     let signature = header("x-agora-signature")
         .or_else(|| header("x-hito-signature"))
+        .or_else(|| header("x-hub-signature-256"))
         .unwrap_or("");
     // An unknown integration and a wrong signature answer the same.
     let Some((integration, secret)) = state.store.integration_secret(id).await? else {
@@ -217,22 +223,46 @@ pub async fn receive(
     if !verify_signature(hex(&secret).as_bytes(), &body, signature) {
         return Err(AppError::unauthenticated());
     }
-    let payload: Payload =
-        serde_json::from_slice(&body).map_err(|_| AppError::invalid("invalid payload"))?;
-    let text = clean(&payload.text, TEXT_MAX);
+    let (title, text, url) = if integration.kind == IntegrationKind::GitHub {
+        // GitHub's default content type wraps the JSON in a form field.
+        let form = header("content-type")
+            .is_some_and(|t| t.starts_with("application/x-www-form-urlencoded"));
+        let json = if form {
+            github_events::form_payload(&body)
+                .ok_or_else(|| AppError::invalid("invalid payload"))?
+        } else {
+            body.to_vec()
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(&json).map_err(|_| AppError::invalid("invalid payload"))?;
+        let event = header("x-github-event").unwrap_or("");
+        // Events nobody reads in a chat are accepted and dropped, so GitHub shows a green tick.
+        let Some(summary) = github_events::summarize(event, &value) else {
+            return Ok(StatusCode::ACCEPTED);
+        };
+        (
+            Some(clean(&summary.title, TITLE_MAX)).filter(|t| !t.is_empty()),
+            clean(&summary.text, TEXT_MAX),
+            summary.url.filter(|u| web_link(u)),
+        )
+    } else {
+        let payload: Payload =
+            serde_json::from_slice(&body).map_err(|_| AppError::invalid("invalid payload"))?;
+        let title = payload
+            .title
+            .or_else(|| payload.project.and_then(|p| p.name))
+            .map(|t| clean(&t, TITLE_MAX))
+            .filter(|t| !t.is_empty());
+        let url = payload
+            .url
+            .or(payload.server_url)
+            .map(|u| u.trim().to_owned())
+            .filter(|u| web_link(u));
+        (title, clean(&payload.text, TEXT_MAX), url)
+    };
     if text.is_empty() {
         return Err(AppError::invalid("the notice has no text"));
     }
-    let title = payload
-        .title
-        .or_else(|| payload.project.and_then(|p| p.name))
-        .map(|t| clean(&t, TITLE_MAX))
-        .filter(|t| !t.is_empty());
-    let url = payload
-        .url
-        .or(payload.server_url)
-        .map(|u| u.trim().to_owned())
-        .filter(|u| web_link(u));
     let hash: [u8; 32] = Sha256::digest(&body).into();
     let recorded = state
         .store

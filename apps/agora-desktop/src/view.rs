@@ -1197,7 +1197,7 @@ fn notice_item(ui: &mut Ui, look: &Look, notice: &IntegrationNotice) {
         let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
         ui.painter()
             .rect_filled(rect, 10.0, color(p.surface_sunken));
-        if let Some(i) = nodalia_theme::icons::get("link") {
+        if let Some(i) = nodalia_theme::icons::get(crate::integrations::kind_icon(notice.kind)) {
             nodalia_theme::icons::paint(
                 ui.painter(),
                 rect.shrink(9.0),

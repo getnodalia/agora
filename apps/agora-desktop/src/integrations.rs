@@ -81,6 +81,11 @@ impl IntegrationsDialog {
         }
     }
 
+    /// The name a GitHub connection gets until the person types the repository.
+    fn github_name(&self) -> String {
+        trf("GitHub in #{}", &[&self.channel_name])
+    }
+
     /// The name Hito's connection gets when the person does not choose one.
     fn hito_name(&self) -> String {
         trf("Hito in #{}", &[&self.channel_name])
@@ -120,6 +125,7 @@ impl IntegrationsDialog {
                 self.kind = kind;
                 self.name = match kind {
                     IntegrationKind::Hito => self.hito_name(),
+                    IntegrationKind::GitHub => self.github_name(),
                     IntegrationKind::Webhook => String::new(),
                 };
                 self.step = Step::Name;
@@ -237,9 +243,19 @@ impl IntegrationsDialog {
     }
 }
 
+/// The icon that stands for an integration, in the list and on its notices.
+pub fn kind_icon(kind: IntegrationKind) -> &'static str {
+    match kind {
+        IntegrationKind::Hito => "check-square",
+        IntegrationKind::GitHub => "branch",
+        IntegrationKind::Webhook => "link",
+    }
+}
+
 pub fn kind_label(kind: IntegrationKind) -> &'static str {
     match kind {
         IntegrationKind::Hito => "Hito",
+        IntegrationKind::GitHub => "GitHub",
         IntegrationKind::Webhook => tr("Webhook"),
     }
 }
@@ -388,11 +404,12 @@ fn integration_card(
     card(look).inner_margin(12).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            let icon = match integration.kind {
-                IntegrationKind::Hito => "check-square",
-                IntegrationKind::Webhook => "link",
-            };
-            crate::widgets::icon(ui, icon, 18.0, color(p.text_secondary));
+            crate::widgets::icon(
+                ui,
+                kind_icon(integration.kind),
+                18.0,
+                color(p.text_secondary),
+            );
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(&integration.name)
@@ -449,13 +466,20 @@ fn choose_view(
         .is_some_and(|list| list.iter().any(|i| i.kind == IntegrationKind::Hito));
     let connected = tr("Connected");
     let enabled = !dialog.pending;
-    let tiles: [(&str, &str, &str, Option<&str>, IntegrationsAction); 5] = [
+    let tiles: [(&str, &str, &str, Option<&str>, IntegrationsAction); 6] = [
         (
             "check-square",
             "Hito",
             tr("Tasks and milestones of a project, as they change."),
             hito_connected.then_some(connected),
             IntegrationsAction::ConnectHito,
+        ),
+        (
+            "branch",
+            "GitHub",
+            tr("Pushes, pull requests, issues and releases of a repository."),
+            None,
+            IntegrationsAction::Kind(IntegrationKind::GitHub),
         ),
         (
             "package",
@@ -590,14 +614,20 @@ fn name_view(
     let p = &look.palette;
     progress(ui, look, 2, tr("Name it"));
     let title = match dialog.kind {
-        IntegrationKind::Hito => trf("Connect {}", &[kind_label(dialog.kind)]),
+        IntegrationKind::Hito | IntegrationKind::GitHub => {
+            trf("Connect {}", &[kind_label(dialog.kind)])
+        }
         IntegrationKind::Webhook => tr("Set up a web connection").to_owned(),
     };
     heading(ui, look, &title);
     note(
         ui,
         look,
-        tr("The name appears on every notice, so people know where it came from."),
+        if dialog.kind == IntegrationKind::GitHub {
+            tr("Name it after the repository, for example acme/app. The name appears on every notice.")
+        } else {
+            tr("The name appears on every notice, so people know where it came from.")
+        },
     );
     ui.label(
         RichText::new(tr("Name"))
@@ -663,6 +693,35 @@ fn created_view(
             copy_row(ui, look, tr("Address"), &created.url, actions);
             numbered(ui, look, 3, tr("Paste this key:"));
             copy_row(ui, look, tr("Key"), &created.secret, actions);
+        }
+        IntegrationKind::GitHub => {
+            numbered(
+                ui,
+                look,
+                1,
+                tr("On GitHub, open the repository and go to Settings, Webhooks, then Add webhook."),
+            );
+            numbered(ui, look, 2, tr("Paste this address as the Payload URL:"));
+            copy_row(ui, look, tr("Address"), &created.url, actions);
+            numbered(ui, look, 3, tr("Paste this key as the Secret:"));
+            copy_row(ui, look, tr("Key"), &created.secret, actions);
+            numbered(
+                ui,
+                look,
+                4,
+                tr("Leave the content type as it is and choose Send me everything. Ágora shows only what matters."),
+            );
+            numbered(
+                ui,
+                look,
+                5,
+                tr("Press Add webhook. GitHub sends a first message, and Ágora answers here that it is connected."),
+            );
+            note(
+                ui,
+                look,
+                tr("GitHub has to reach your server, so the address must be public and use https."),
+            );
         }
         IntegrationKind::Webhook => {
             numbered(ui, look, 1, tr("Send an HTTP POST with a JSON body whose text field holds the notice, to this address:"));

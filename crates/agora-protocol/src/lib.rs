@@ -312,7 +312,7 @@ pub struct GitHubEvent {
     pub received_at: Timestamp,
 }
 
-/// What sends notices through an integration. Both are incoming webhooks; the kind names the app.
+/// What sends notices through an integration. All are incoming webhooks; the kind names the app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntegrationKind {
@@ -320,6 +320,9 @@ pub enum IntegrationKind {
     Hito,
     /// Any app or script that can send a signed HTTP request.
     Webhook,
+    /// A GitHub repository's webhook: pushes, pull requests, issues, releases and CI runs.
+    #[serde(rename = "github")]
+    GitHub,
 }
 
 /// An incoming webhook that posts notices to a channel.
