@@ -307,6 +307,54 @@ fn first_accepted<T, E>(
     candidates.iter().copied().find(|mode| apply(*mode).is_ok())
 }
 
+/// Open the first camera. On a Mac the system lists a camera's rate range by both ends, but only
+/// the top of a range can be set, so the mode `RequestedFormatType::None` picks (the first one
+/// listed, at the low end) is refused: that was the "640x480@15FPS YUYV Not Found/Rejected/
+/// Unsupported" which kept the camera from ever starting. The requests here name the highest
+/// rate and then the highest size, which are always the top of a range, and `None` comes last
+/// for the cameras on which the others find nothing.
+fn open_camera() -> Result<nokhwa::Camera, String> {
+    use nokhwa::pixel_format::RgbFormat;
+    use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
+
+    first_opened(
+        &[
+            RequestedFormatType::AbsoluteHighestFrameRate,
+            RequestedFormatType::AbsoluteHighestResolution,
+            RequestedFormatType::None,
+        ],
+        |request| {
+            nokhwa::Camera::new(
+                CameraIndex::Index(0),
+                RequestedFormat::new::<RgbFormat>(*request),
+            )
+        },
+    )
+}
+
+/// Open with each request in turn until one is taken. When none is, every reason is reported:
+/// "the camera would not open" is of no use to whoever has to fix it.
+fn first_opened<R: std::fmt::Debug, T, E: std::fmt::Display>(
+    requests: &[R],
+    mut open: impl FnMut(&R) -> Result<T, E>,
+) -> Result<T, String> {
+    let mut reasons = Vec::new();
+    for request in requests {
+        match open(request) {
+            Ok(opened) => return Ok(opened),
+            Err(why) => {
+                tracing::warn!(?request, %why, "camera did not open");
+                reasons.push(format!("{request:?}: {why}"));
+            }
+        }
+    }
+    Err(if reasons.is_empty() {
+        "no way of opening the camera".to_string()
+    } else {
+        reasons.join("; ")
+    })
+}
+
 /// Ask the system for permission to use the camera and wait for the answer (macOS asks; the
 /// others always allow). A refusal stays refused until the person changes it in the settings.
 fn camera_permission(stop: &AtomicBool) -> Result<(), Problem> {
@@ -329,25 +377,31 @@ fn camera_permission(stop: &AtomicBool) -> Result<(), Problem> {
 
 fn run_camera(stop: &AtomicBool, shot: impl Fn(Shot)) -> Result<(), Problem> {
     use nokhwa::pixel_format::RgbFormat;
-    use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
-    use nokhwa::Camera;
+    use nokhwa::utils::{RequestedFormat, RequestedFormatType};
 
     camera_permission(stop)?;
     if stop.load(Ordering::Relaxed) {
         return Ok(());
     }
-    let first = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
-    let mut camera = Camera::new(CameraIndex::Index(0), first)
-        .map_err(|e| Problem::because(Device::Camera, e))?;
+    let mut camera = open_camera().map_err(|why| Problem::because(Device::Camera, why))?;
     let modes = camera
         .compatible_camera_formats()
         .map_err(|e| Problem::because(Device::Camera, e))?;
-    // Try the modes best first; a camera that takes none still streams in the mode it has.
-    first_accepted(&camera_candidates(&modes), |mode| {
+    // The camera now streams in the mode it opened with. Move to a smaller one when it accepts
+    // one: the picture is shrunk before it is sent, so a smaller one is cheaper all round.
+    let candidates = camera_candidates(&modes);
+    match first_accepted(&candidates, |mode| {
         camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
             RequestedFormatType::Exact(mode),
         ))
-    });
+    }) {
+        Some(mode) => tracing::info!(%mode, "camera mode chosen"),
+        None => tracing::info!(
+            listed = modes.len(),
+            "camera keeps the mode it opened with ({})",
+            camera.camera_format()
+        ),
+    }
     camera
         .open_stream()
         .map_err(|e| Problem::because(Device::Camera, e))?;
@@ -476,5 +530,44 @@ mod tests {
         let candidates = camera_candidates(&mac_modes());
         let taken = first_accepted(&candidates, |_| Err::<(), _>("refused"));
         assert_eq!(taken, None);
+    }
+
+    #[test]
+    fn opening_falls_through_to_the_next_request_and_says_why_when_all_fail() {
+        let mut asked = Vec::new();
+        let opened = first_opened(&["highest rate", "highest size", "any"], |r| {
+            asked.push(*r);
+            if *r == "any" {
+                Ok(7)
+            } else {
+                Err("Not Found/Rejected/Unsupported")
+            }
+        });
+        assert_eq!(opened, Ok(7));
+        assert_eq!(asked, ["highest rate", "highest size", "any"]);
+
+        let failed = first_opened(&["a", "b"], |_| Err::<(), _>("refused")).unwrap_err();
+        assert_eq!(failed, "\"a\": refused; \"b\": refused");
+        assert!(first_opened::<&str, (), &str>(&[], |_| Ok(())).is_err());
+    }
+
+    /// The Mac lists the ends of a range, and opens only at the top, so the first request tried
+    /// must land on a rate that is the top of some range, never the low end `None` picks.
+    #[test]
+    fn the_first_request_lands_on_the_top_of_a_range_not_its_low_end() {
+        let listed = vec![
+            mode(640, 480, FrameFormat::YUYV, 15),
+            mode(640, 480, FrameFormat::YUYV, 30),
+            mode(1280, 720, FrameFormat::YUYV, 15),
+            mode(1280, 720, FrameFormat::YUYV, 30),
+        ];
+        let none = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
+        assert_eq!(none.fulfill(&listed).map(|m| m.frame_rate()), Some(15));
+        let highest =
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        assert_eq!(
+            highest.fulfill(&listed),
+            Some(mode(1280, 720, FrameFormat::YUYV, 30))
+        );
     }
 }
