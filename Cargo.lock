@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "agora-client"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "agora-core",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "agora-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "agora-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "agora-client",
  "agora-core",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "agora-e2e"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "agora-core",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "agora-protocol"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "agora-core",
  "serde",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "agora-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "agora-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "agora-core",
  "agora-protocol",

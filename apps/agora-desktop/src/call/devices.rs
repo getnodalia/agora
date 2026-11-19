@@ -250,18 +250,96 @@ pub fn camera(report: Report, shot: impl Fn(Shot) + Send + 'static) -> Worker {
     })
 }
 
+/// The picture size and rate asked of the camera: small, because it is shrunk before it is sent.
+const CAMERA_PIXELS: u64 = 640 * 480;
+const CAMERA_FPS: u32 = 15;
+/// How long to wait for the person to answer the system's camera question.
+const CAMERA_PERMISSION_WAIT: Duration = Duration::from_secs(60);
+
+/// How a camera's native picture format ranks when two would do: the cheapest to decode first.
+fn format_rank(format: nokhwa::utils::FrameFormat) -> Option<u8> {
+    use nokhwa::utils::FrameFormat;
+    match format {
+        FrameFormat::MJPEG => Some(0),
+        FrameFormat::YUYV => Some(1),
+        FrameFormat::NV12 => Some(2),
+        FrameFormat::RAWRGB => Some(3),
+        FrameFormat::RAWBGR => Some(4),
+        _ => None,
+    }
+}
+
+/// The mode to open a camera in, out of the ones it offers: the size nearest 640x480, then the
+/// rate nearest 15, then the format that decodes cheapest. Cameras differ in the formats they
+/// list (the Mac's offer no MJPEG, and not every size at every rate), so asking for one exact mode
+/// fails on some; choosing among what is listed never does while one mode can be decoded.
+fn pick_camera_format(
+    formats: &[nokhwa::utils::CameraFormat],
+) -> Option<nokhwa::utils::CameraFormat> {
+    formats
+        .iter()
+        .filter_map(|mode| {
+            let rank = format_rank(mode.format())?;
+            let size = u64::from(mode.width()) * u64::from(mode.height());
+            if size == 0 {
+                return None;
+            }
+            let rate = mode.frame_rate();
+            Some((
+                (
+                    size.abs_diff(CAMERA_PIXELS),
+                    rate.abs_diff(CAMERA_FPS),
+                    rank,
+                ),
+                *mode,
+            ))
+        })
+        .min_by_key(|(key, _)| *key)
+        .map(|(_, mode)| mode)
+}
+
+/// Ask the system for permission to use the camera and wait for the answer (macOS asks; the
+/// others always allow). A refusal stays refused until the person changes it in the settings.
+fn camera_permission(stop: &AtomicBool) -> Result<(), Problem> {
+    nokhwa::nokhwa_initialize(|_| {});
+    let until = Instant::now() + CAMERA_PERMISSION_WAIT;
+    while !nokhwa::nokhwa_check() {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        if Instant::now() >= until {
+            return Err(Problem::because(
+                Device::Camera,
+                "Ágora has no permission to use the camera (System Settings, Privacy & Security, Camera)",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
 fn run_camera(stop: &AtomicBool, shot: impl Fn(Shot)) -> Result<(), Problem> {
     use nokhwa::pixel_format::RgbFormat;
-    use nokhwa::utils::{
-        CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
-    };
+    use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
     use nokhwa::Camera;
 
-    let wanted = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
-        CameraFormat::new(Resolution::new(640, 480), FrameFormat::MJPEG, 15),
-    ));
-    let mut camera = Camera::new(CameraIndex::Index(0), wanted)
+    camera_permission(stop)?;
+    if stop.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    let first = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
+    let mut camera = Camera::new(CameraIndex::Index(0), first)
         .map_err(|e| Problem::because(Device::Camera, e))?;
+    let modes = camera
+        .compatible_camera_formats()
+        .map_err(|e| Problem::because(Device::Camera, e))?;
+    if let Some(mode) = pick_camera_format(&modes) {
+        camera
+            .set_camera_requset(RequestedFormat::new::<RgbFormat>(
+                RequestedFormatType::Exact(mode),
+            ))
+            .map_err(|e| Problem::because(Device::Camera, e))?;
+    }
     camera
         .open_stream()
         .map_err(|e| Problem::because(Device::Camera, e))?;
@@ -286,4 +364,78 @@ fn run_camera(stop: &AtomicBool, shot: impl Fn(Shot)) -> Result<(), Problem> {
     }
     let _ = camera.stop_stream();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nokhwa::pixel_format::RgbFormat;
+    use nokhwa::utils::{
+        CameraFormat, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+    };
+
+    fn mode(width: u32, height: u32, format: FrameFormat, fps: u32) -> CameraFormat {
+        CameraFormat::new(Resolution::new(width, height), format, fps)
+    }
+
+    /// What a Mac's built-in camera lists: no MJPEG, and no 640x480.
+    fn mac_modes() -> Vec<CameraFormat> {
+        vec![
+            mode(1920, 1080, FrameFormat::NV12, 30),
+            mode(1280, 720, FrameFormat::NV12, 30),
+            mode(1280, 720, FrameFormat::YUYV, 30),
+            mode(640, 360, FrameFormat::NV12, 30),
+        ]
+    }
+
+    #[test]
+    fn a_mac_camera_without_mjpeg_or_640x480_still_gets_a_mode() {
+        let mac = mac_modes();
+        // The request that failed on macOS: one exact format, at a size the camera lacks.
+        let old = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(mode(
+            640,
+            480,
+            FrameFormat::MJPEG,
+            15,
+        )));
+        assert_eq!(old.fulfill(&mac), None);
+
+        let picked = pick_camera_format(&mac).expect("a mode");
+        assert_eq!(picked.resolution(), Resolution::new(640, 360));
+    }
+
+    #[test]
+    fn the_size_nearest_640x480_wins_over_a_bigger_picture() {
+        let modes = vec![
+            mode(1920, 1080, FrameFormat::MJPEG, 30),
+            mode(640, 480, FrameFormat::MJPEG, 30),
+            mode(320, 240, FrameFormat::MJPEG, 30),
+        ];
+        let picked = pick_camera_format(&modes).expect("a mode");
+        assert_eq!(picked.resolution(), Resolution::new(640, 480));
+    }
+
+    #[test]
+    fn at_one_size_the_rate_nearest_15_wins_then_the_cheaper_format() {
+        let modes = vec![
+            mode(640, 480, FrameFormat::NV12, 30),
+            mode(640, 480, FrameFormat::NV12, 15),
+            mode(640, 480, FrameFormat::YUYV, 15),
+            mode(640, 480, FrameFormat::MJPEG, 15),
+        ];
+        let picked = pick_camera_format(&modes).expect("a mode");
+        assert_eq!(picked.frame_rate(), 15);
+        assert_eq!(picked.format(), FrameFormat::MJPEG);
+    }
+
+    #[test]
+    fn modes_that_cannot_be_decoded_or_are_empty_are_never_picked() {
+        let modes = vec![
+            mode(640, 480, FrameFormat::GRAY, 15),
+            mode(0, 0, FrameFormat::MJPEG, 15),
+            mode(0, 480, FrameFormat::YUYV, 15),
+        ];
+        assert_eq!(pick_camera_format(&modes), None);
+        assert_eq!(pick_camera_format(&[]), None);
+    }
 }
