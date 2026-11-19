@@ -98,6 +98,8 @@ pub enum IntegrationsAction {
     Test(i64),
     /// Choose what to connect and move on to its name.
     Kind(IntegrationKind),
+    /// A ready-made web connection (builds, monitoring, a script) with this default name.
+    Preset(&'static str),
     Step(Step),
     Dismiss,
 }
@@ -120,6 +122,13 @@ impl IntegrationsDialog {
                     IntegrationKind::Hito => self.hito_name(),
                     IntegrationKind::Webhook => String::new(),
                 };
+                self.step = Step::Name;
+                self.error = None;
+                return;
+            }
+            IntegrationsAction::Preset(name) => {
+                self.kind = IntegrationKind::Webhook;
+                self.name = tr(name).to_owned();
                 self.step = Step::Name;
                 self.error = None;
                 return;
@@ -187,6 +196,7 @@ impl IntegrationsDialog {
                 Reply::Integrations(IntegrationsReply::Done(client.delete_integration(id).await))
             }),
             IntegrationsAction::Kind(_)
+            | IntegrationsAction::Preset(_)
             | IntegrationsAction::Step(_)
             | IntegrationsAction::Dismiss => {}
         }
@@ -243,6 +253,9 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut IntegrationsDialog, actions: 
     if let Some(created) = dialog.created.clone() {
         created_view(ui, look, dialog, &created, &mut wanted, actions);
     } else {
+        if dialog.admin && matches!(dialog.step, Step::List | Step::Choose) {
+            tab_bar(ui, look, dialog, &mut wanted);
+        }
         match dialog.step {
             Step::List => list_view(ui, look, dialog, &mut wanted),
             Step::Choose => choose_view(ui, look, dialog, &mut wanted),
@@ -254,6 +267,28 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut IntegrationsDialog, actions: 
         ui.spinner();
     }
     actions.extend(wanted.into_iter().map(Action::Integrations));
+}
+
+/// What is connected, and the gallery of plugins to add.
+fn tab_bar(
+    ui: &mut Ui,
+    look: &Look,
+    dialog: &IntegrationsDialog,
+    wanted: &mut Vec<IntegrationsAction>,
+) {
+    let connected = match &dialog.list {
+        Some(list) => trf("Connected ({})", &[&list.len().to_string()]),
+        None => tr("Connected").to_owned(),
+    };
+    ui.horizontal(|ui| {
+        if cr::tab(ui, look, &connected, dialog.step == Step::List).clicked() {
+            wanted.push(IntegrationsAction::Step(Step::List));
+        }
+        if cr::tab(ui, look, tr("Plugins"), dialog.step == Step::Choose).clicked() {
+            wanted.push(IntegrationsAction::Step(Step::Choose));
+        }
+    });
+    ui.add_space(8.0);
 }
 
 /// A card on the dialog's surface: one step darker than the dialog, with a hairline.
@@ -353,7 +388,11 @@ fn integration_card(
     card(look).inner_margin(12).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            crate::widgets::icon(ui, "link", 18.0, color(p.text_secondary));
+            let icon = match integration.kind {
+                IntegrationKind::Hito => "check-square",
+                IntegrationKind::Webhook => "link",
+            };
+            crate::widgets::icon(ui, icon, 18.0, color(p.text_secondary));
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(&integration.name)
@@ -399,70 +438,147 @@ fn choose_view(
     dialog: &IntegrationsDialog,
     wanted: &mut Vec<IntegrationsAction>,
 ) {
-    progress(ui, look, 1, tr("What to connect"));
-    heading(ui, look, tr("What do you want to connect?"));
-    choice_card(
+    note(
         ui,
         look,
-        "Hito",
-        tr("Tasks and milestones of a Hito project show up here as they are completed or change."),
-        tr("Connect Hito"),
-        !dialog.pending,
-        true,
-        || wanted.push(IntegrationsAction::ConnectHito),
+        tr("Pick what to connect to this channel. Each one posts its notices here."),
     );
-    ui.add_space(8.0);
-    choice_card(
-        ui,
-        look,
-        tr("Another app or script"),
-        tr("Anything that can send a signed web request: a build server, monitoring, or your own script."),
-        tr("Set up"),
-        !dialog.pending,
-        false,
-        || wanted.push(IntegrationsAction::Kind(IntegrationKind::Webhook)),
-    );
-    ui.add_space(10.0);
-    if cr::secondary_button(ui, look, tr("Back"), true).clicked() {
-        wanted.push(IntegrationsAction::Step(Step::List));
+    let hito_connected = dialog
+        .list
+        .as_ref()
+        .is_some_and(|list| list.iter().any(|i| i.kind == IntegrationKind::Hito));
+    let connected = tr("Connected");
+    let enabled = !dialog.pending;
+    let tiles: [(&str, &str, &str, Option<&str>, IntegrationsAction); 5] = [
+        (
+            "check-square",
+            "Hito",
+            tr("Tasks and milestones of a project, as they change."),
+            hito_connected.then_some(connected),
+            IntegrationsAction::ConnectHito,
+        ),
+        (
+            "package",
+            tr("Build server"),
+            tr("Builds and deployments: started, passed, failed."),
+            None,
+            IntegrationsAction::Preset("Builds"),
+        ),
+        (
+            "monitor",
+            tr("Monitoring"),
+            tr("Alerts from your servers and services."),
+            None,
+            IntegrationsAction::Preset("Monitoring"),
+        ),
+        (
+            "terminal",
+            tr("Script"),
+            tr("Anything you run yourself, from a cron job to a shell."),
+            None,
+            IntegrationsAction::Preset("My script"),
+        ),
+        (
+            "link",
+            tr("Another app"),
+            tr("Any app that can send a signed web request."),
+            None,
+            IntegrationsAction::Kind(IntegrationKind::Webhook),
+        ),
+    ];
+    let gap = 10.0;
+    let width = ((ui.available_width() - gap) / 2.0).floor();
+    for pair in tiles.chunks(2) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (icon, title, blurb, status, action) in pair {
+                if plugin_tile(ui, look, width, icon, title, blurb, *status, enabled) {
+                    wanted.push(action.clone());
+                }
+            }
+        });
+        ui.add_space(gap - 4.0);
     }
 }
 
+/// One plugin in the gallery: its icon, name and a line about it. The whole tile is the button.
 #[allow(clippy::too_many_arguments)]
-fn choice_card(
+fn plugin_tile(
     ui: &mut Ui,
     look: &Look,
+    width: f32,
+    icon: &str,
     title: &str,
-    body: &str,
-    button: &str,
+    blurb: &str,
+    status: Option<&str>,
     enabled: bool,
-    primary: bool,
-    on_click: impl FnOnce(),
-) {
+) -> bool {
+    use nodalia_theme::icons;
     let p = &look.palette;
-    card(look).inner_margin(14).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.label(
-            RichText::new(title)
-                .size(font_size::LARGE)
-                .strong()
-                .color(color(p.text_primary)),
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 112.0), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, title));
+    let hot = enabled && response.hovered();
+    let painter = ui.painter_at(rect);
+    painter.rect(
+        rect,
+        egui::CornerRadius::same(12),
+        color(p.surface_window),
+        egui::Stroke::new(
+            if hot || response.has_focus() {
+                1.5
+            } else {
+                1.0
+            },
+            color(if hot || response.has_focus() {
+                p.accent_default
+            } else {
+                p.border_subtle
+            }),
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let badge = egui::Rect::from_min_size(rect.min + vec2(12.0, 12.0), vec2(36.0, 36.0));
+    painter.rect_filled(badge, egui::CornerRadius::same(10), color(p.accent_subtle));
+    if let Some(i) = icons::get(icon) {
+        icons::paint(
+            &painter,
+            badge.shrink(8.0),
+            i,
+            icons::Style::bold(color(p.accent_text)),
         );
-        note(ui, look, body);
-        let row = vec2(ui.available_width(), 32.0);
-        let clicked = ui
-            .allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-                if primary {
-                    cr::primary_button(ui, look, button, enabled).clicked()
-                } else {
-                    cr::secondary_button(ui, look, button, enabled).clicked()
-                }
-            })
-            .inner;
-        if clicked {
-            on_click();
-        }
-    });
+    }
+    if let Some(status) = status {
+        let galley = painter.layout_no_wrap(
+            status.to_owned(),
+            egui::FontId::proportional(font_size::CAPTION),
+            color(p.status_success_fg),
+        );
+        painter.galley(
+            egui::pos2(rect.max.x - 12.0 - galley.size().x, rect.min.y + 14.0),
+            galley,
+            color(p.status_success_fg),
+        );
+    }
+    let name = painter.layout_no_wrap(
+        title.to_owned(),
+        egui::FontId::new(font_size::LARGE, look.strong.clone()),
+        color(p.text_primary),
+    );
+    painter.galley(rect.min + vec2(12.0, 56.0), name, color(p.text_primary));
+    let text = painter.layout(
+        blurb.to_owned(),
+        egui::FontId::proportional(font_size::CAPTION),
+        color(p.text_tertiary),
+        width - 24.0,
+    );
+    painter.galley(rect.min + vec2(12.0, 78.0), text, color(p.text_tertiary));
+    if enabled {
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+    } else {
+        false
+    }
 }
 
 fn name_view(
@@ -473,7 +589,11 @@ fn name_view(
 ) {
     let p = &look.palette;
     progress(ui, look, 2, tr("Name it"));
-    heading(ui, look, &trf("Connect {}", &[kind_label(dialog.kind)]));
+    let title = match dialog.kind {
+        IntegrationKind::Hito => trf("Connect {}", &[kind_label(dialog.kind)]),
+        IntegrationKind::Webhook => tr("Set up a web connection").to_owned(),
+    };
+    heading(ui, look, &title);
     note(
         ui,
         look,

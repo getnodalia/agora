@@ -2,7 +2,7 @@
 
 An integration lets another app post notices to a channel: a Hito project, a build server, a
 script. A workspace admin adds one from the channel's details (**Integrations**) or from the
-global menu (**Conversation ▸ Integrations**). Ágora then shows an address and a key, once. The
+global menu (**Conversation ▸ Integrations**). The window has two tabs: **Connected**, and **Plugins**, a gallery of what can be connected (Hito, a build server, monitoring, a script, any other app that sends a signed web request). Hito connects in one click; the others ask for a name. Ágora then shows an address and a key, once. The
 other app sends each notice to that address, signed with the key.
 
 Notices are **not end-to-end encrypted**. The server reads and stores them so that every member
