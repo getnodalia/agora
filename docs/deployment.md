@@ -71,6 +71,19 @@ Once the first account is created, initialization cannot be repeated. Existing i
 with accounts are marked initialized during migration and do not need a token. Back up the SQLite
 database before upgrading, and test the upgrade on a copy first.
 
+## Someone forgot their password
+
+People who saved their recovery key use "Forgot your password?" on the sign-in screen. Everyone
+else needs a one-use code from you:
+
+```sh
+sudo -u agora agora-server --config /etc/agora/agora.toml reset-password ana
+```
+
+It prints a code valid for one hour. Give it to that person privately; they enter it in the same
+screen with a new password. Add `--remove-two-step` if they also lost their authenticator and
+recovery codes. Using the code signs out every session of the account.
+
 ## TLS with Caddy
 
 Caddy gets and renews a certificate by itself. `/etc/caddy/Caddyfile`:

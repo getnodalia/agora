@@ -478,17 +478,61 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
         );
         for w in &model.workspaces {
             let (unread, mentions) = model.workspace_unread(w.id);
-            ui.horizontal(|ui| {
-                let selected = model.workspace == Some(w.id);
-                if ui.selectable_label(selected, &w.name).clicked() {
-                    actions.push(Action::SelectWorkspace(w.id));
-                }
-                if mentions > 0 {
-                    badge(ui, look, mentions, true);
-                } else if unread > 0 {
-                    badge(ui, look, unread, false);
-                }
-            });
+            let selected = model.workspace == Some(w.id);
+            let (row, response) = ui
+                .allocate_exact_size(vec2((rect.width() - 24.0).max(200.0), 36.0), Sense::click());
+            let fill = if selected {
+                color(p.accent_subtle)
+            } else if response.hovered() {
+                color(p.control_bg_hover)
+            } else {
+                Color32::TRANSPARENT
+            };
+            ui.painter().rect_filled(row, CornerRadius::same(8), fill);
+            let tile = Rect::from_min_size(row.min + vec2(6.0, 6.0), vec2(24.0, 24.0));
+            ui.painter()
+                .rect_filled(tile, CornerRadius::same(7), color(p.accent_default));
+            ui.painter().text(
+                tile.center(),
+                egui::Align2::CENTER_CENTER,
+                w.name
+                    .chars()
+                    .next()
+                    .map(|c| c.to_uppercase().to_string())
+                    .unwrap_or_default(),
+                egui::FontId::proportional(13.0),
+                color(p.text_on_accent),
+            );
+            ui.painter().text(
+                pos2(tile.right() + 8.0, row.center().y - 6.0),
+                egui::Align2::LEFT_CENTER,
+                &w.name,
+                egui::FontId::proportional(font_size::BODY),
+                color(p.text_primary),
+            );
+            ui.painter().text(
+                pos2(tile.right() + 8.0, row.center().y + 8.0),
+                egui::Align2::LEFT_CENTER,
+                crate::dialogs::organization_role_label(w.role),
+                egui::FontId::proportional(font_size::CAPTION),
+                color(p.text_secondary),
+            );
+            if mentions > 0 || unread > 0 {
+                let badge_rect = Rect::from_center_size(
+                    pos2(row.right() - 22.0, row.center().y),
+                    vec2(28.0, 22.0),
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(badge_rect), |ui| {
+                    if mentions > 0 {
+                        badge(ui, look, mentions, true);
+                    } else {
+                        badge(ui, look, unread, false);
+                    }
+                });
+            }
+            if response.clicked() {
+                actions.push(Action::SelectWorkspace(w.id));
+            }
         }
         ui.separator();
         if model.workspace.is_some() && ui.button(tr("GitHub activity")).clicked() {
@@ -506,6 +550,23 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
             actions.push(Action::Dialog(Dialog::JoinWorkspace {
                 code: String::new(),
             }));
+        }
+        if let Some(w) = model
+            .current_workspace()
+            .filter(|w| w.role == agora_core::Role::Owner)
+        {
+            ui.separator();
+            let delete = ui.add(egui::Button::new(
+                RichText::new(tr("Delete this workspace…")).color(color(p.status_danger_fg)),
+            ));
+            if delete.clicked() {
+                actions.push(Action::Dialog(Dialog::DeleteWorkspace {
+                    id: w.id,
+                    name: w.name.clone(),
+                    typed: String::new(),
+                    pending: false,
+                }));
+            }
         }
     });
 }
@@ -2010,10 +2071,17 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                                 RichText::new(date(c.created_at)).color(color(p.text_primary)),
                             );
                             ui.add_space(10.0);
-                            ui.horizontal_wrapped(|ui| {
+                            ui.vertical(|ui| {
+                                let width = ui.available_width();
                                 if ws.as_ref().is_some_and(|w| w.role.can_invite())
-                                    && cr::secondary_button(ui, look, tr("Invite people"), true)
-                                        .clicked()
+                                    && cr::secondary_button_min(
+                                        ui,
+                                        look,
+                                        tr("Invite people"),
+                                        true,
+                                        width,
+                                    )
+                                    .clicked()
                                 {
                                     actions.push(Action::Dialog(Dialog::Invite {
                                         invite: None,
@@ -2022,11 +2090,12 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                                     }));
                                 }
                                 if c.joined
-                                    && cr::secondary_button(
+                                    && cr::secondary_button_min(
                                         ui,
                                         look,
                                         tr("Share earlier messages"),
                                         true,
+                                        width,
                                     )
                                     .clicked()
                                 {
@@ -2037,14 +2106,26 @@ fn details_panel(ui: &mut Ui, main: &Main, look: &Look, actions: &mut Vec<Action
                                 }
                                 if c.joined
                                     && c.kind != ChannelKind::Direct
-                                    && cr::secondary_button(ui, look, tr("Integrations"), true)
-                                        .clicked()
+                                    && cr::secondary_button_min(
+                                        ui,
+                                        look,
+                                        tr("Integrations"),
+                                        true,
+                                        width,
+                                    )
+                                    .clicked()
                                 {
                                     actions.push(Action::OpenIntegrations(c.id));
                                 }
                                 if c.joined
-                                    && cr::secondary_button(ui, look, tr("Leave channel"), true)
-                                        .clicked()
+                                    && cr::secondary_button_min(
+                                        ui,
+                                        look,
+                                        tr("Leave channel"),
+                                        true,
+                                        width,
+                                    )
+                                    .clicked()
                                 {
                                     actions.push(Action::LeaveChannel(c.id));
                                 }

@@ -12,7 +12,8 @@ mod update_check;
 const HELP: &str = "agora-server: Ágora's self-hostable server
 
 USAGE:
-    agora-server [--config FILE] [init-token | check-updates | self-update [--auto] | backup FILE]
+    agora-server [--config FILE] [init-token | check-updates | self-update [--auto] | backup FILE |
+                          reset-password USERNAME [--remove-two-step]]
 
 OPTIONS:
     init-token          Create a one-use setup token, valid for 15 minutes
@@ -21,6 +22,10 @@ OPTIONS:
                         database, install, restart and check /healthz. With --auto (the
                         agora-server-update.timer) it does nothing if [updates] automatic = false
     backup FILE         Create a consistent SQLite snapshot at a new path
+    reset-password USERNAME
+                        Print a one-use code, valid for 1 hour, that lets that person choose
+                        a new password from the sign-in screen (\"Forgot your password?\").
+                        --remove-two-step also turns off their two-step verification
     -c, --config FILE   TOML configuration (see docs/deployment.md)
     -h, --help          Print this help
     -V, --version       Print the version
@@ -40,6 +45,8 @@ fn main() -> ExitCode {
     let mut init_token = false;
     let mut check_updates = false;
     let mut backup_path = None;
+    let mut reset_user: Option<String> = None;
+    let mut remove_two_step = false;
     let mut self_update = false;
     let mut auto = false;
     while let Some(arg) = args.next() {
@@ -55,6 +62,14 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "reset-password" if reset_user.is_none() => match args.next() {
+                Some(u) if !u.starts_with('-') => reset_user = Some(u),
+                _ => {
+                    eprintln!("reset-password needs a username");
+                    return ExitCode::from(2);
+                }
+            },
+            "--remove-two-step" if !remove_two_step => remove_two_step = true,
             "-h" | "--help" => {
                 print!("{HELP}");
                 return ExitCode::SUCCESS;
@@ -81,9 +96,17 @@ fn main() -> ExitCode {
         + u8::from(check_updates)
         + u8::from(self_update)
         + u8::from(backup_path.is_some())
+        + u8::from(reset_user.is_some())
         > 1
     {
-        eprintln!("choose only one of init-token, check-updates, self-update or backup");
+        eprintln!(
+            "choose only one of init-token, check-updates, self-update, backup or reset-password"
+        );
+        return ExitCode::from(2);
+    }
+
+    if remove_two_step && reset_user.is_none() {
+        eprintln!("--remove-two-step belongs to reset-password");
         return ExitCode::from(2);
     }
 
@@ -153,6 +176,8 @@ fn main() -> ExitCode {
             }
             Err(e) => Err(Box::new(e)),
         }
+    } else if let Some(user) = reset_user {
+        runtime.block_on(create_reset_code(config, &user, remove_two_step))
     } else if init_token {
         runtime.block_on(create_init_token(config))
     } else {
@@ -193,5 +218,43 @@ async fn create_init_token(config: Config) -> Result<(), Box<dyn std::error::Err
         .await?;
     store.close().await;
     println!("Setup token (valid for 15 minutes; enter as the invitation code): {token}");
+    Ok(())
+}
+
+/// Issue a one-use code that lets a person who lost their password choose a new one. It needs
+/// the server's database; the plaintext code is printed once.
+async fn create_reset_code(
+    config: Config,
+    username: &str,
+    remove_two_step: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use agora_server::recovery::{self, Purpose};
+    const VALID_MS: i64 = 60 * 60 * 1_000;
+    let store = agora_storage::Store::open(&config.database).await?;
+    let Some(user) = store
+        .user_id_by_username(&username.trim().to_lowercase())
+        .await?
+    else {
+        store.close().await;
+        return Err(format!("there is no account called {username:?}").into());
+    };
+    let code = recovery::new_code();
+    let expires_at = agora_server::auth::now_ms().saturating_add(VALID_MS);
+    store
+        .set_reset_code(
+            user,
+            &recovery::hash(user, Purpose::Operator, &code),
+            expires_at,
+            remove_two_step,
+        )
+        .await?;
+    store.close().await;
+    println!("Reset code for {username} (valid for 1 hour, works once): {code}");
+    println!(
+        "Give it to them privately. They choose \"Forgot your password?\" on the sign-in screen."
+    );
+    if remove_two_step {
+        println!("Their two-step verification is turned off when they use it.");
+    }
     Ok(())
 }

@@ -37,7 +37,7 @@ fn check_auth_rate(state: &AppState, peer: SocketAddr, headers: &HeaderMap) -> A
     }
 }
 
-async fn new_session(state: &AppState, user: User) -> AppResult<SessionResponse> {
+pub(super) async fn new_session(state: &AppState, user: User) -> AppResult<SessionResponse> {
     let token = auth::random_token(32);
     let now = now_ms();
     let expires_at = now.saturating_add(i64::from(state.config.session_days) * 86_400_000);

@@ -163,6 +163,53 @@ pub struct RevokeOtherSessionsRequest {
     pub password: String,
 }
 
+/// Change the password of the signed-in account. The old one is asked again; every other
+/// session is signed out.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub password: String,
+    pub new_password: String,
+}
+
+/// Create (or replace) the account's recovery key. The password is asked again.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecoveryKeyRequest {
+    pub password: String,
+}
+
+/// A recovery key, shown once. The server keeps only a hash.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecoveryKey {
+    pub recovery_key: String,
+}
+
+/// Whether the account has a recovery key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryStatus {
+    pub has_key: bool,
+}
+
+/// Set a new password without the old one, with the account's recovery key or a one-use code
+/// from whoever runs the server. Accounts with two-step verification also send a code from
+/// their authenticator app (or one of their recovery codes) when using the recovery key.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub username: String,
+    pub code: String,
+    pub new_password: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_code: Option<String>,
+}
+
+/// The new session, and the replacement recovery key (shown once).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResetPasswordResponse {
+    pub session: SessionResponse,
+    pub recovery_key: String,
+}
+
 /// A new session. The token is shown once; the server keeps only its hash.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionResponse {
@@ -764,6 +811,10 @@ pub enum ServerEvent {
     ChannelRemoved {
         workspace_id: WorkspaceId,
         channel_id: ChannelId,
+    },
+    /// A workspace the caller belonged to was deleted by its owner.
+    WorkspaceRemoved {
+        workspace_id: WorkspaceId,
     },
     /// Someone joined a workspace the caller belongs to.
     MemberJoined {

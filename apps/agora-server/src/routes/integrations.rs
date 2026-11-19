@@ -118,6 +118,49 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Post a notice through an integration without the other app: an admin checks, right after
+/// connecting, that notices reach the channel.
+pub async fn test(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<StatusCode> {
+    let (integration, _) = state
+        .store
+        .integration_secret(id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    let access = channel_access(&state, integration.channel_id, auth.user.id).await?;
+    manageable(&access)?;
+    if !state
+        .limiter
+        .allow(&format!("hook-id:{id}"), NOTICES_PER_MINUTE)
+    {
+        return Err(AppError::rate_limited());
+    }
+    let now = now_ms();
+    let hash: [u8; 32] = Sha256::digest(format!("test:{id}:{now}").as_bytes()).into();
+    let recorded = state
+        .store
+        .record_notice(agora_storage::integrations::NewNotice {
+            integration: integration.id,
+            channel: integration.channel_id,
+            hash: &hash,
+            title: Some("Test notice"),
+            text: "This is a test: the connection works and notices will appear here.",
+            url: None,
+            now,
+        })
+        .await?;
+    if let Some(notice) = recorded {
+        let audience = state.store.channel_audience(&access.channel).await?;
+        state
+            .hub
+            .send(&audience, &ServerEvent::IntegrationNotice { notice });
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn notices(
     State(state): State<AppState>,
     auth: Auth,

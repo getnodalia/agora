@@ -20,11 +20,14 @@ pub type Result<T> = std::result::Result<T, ClientError>;
 #[derive(Debug)]
 pub enum Reply {
     ServerInfo(String, Result<ServerInfo>),
-    SignedIn(Result<(Client, SessionResponse, Secure)>),
+    /// Signed in; the second part is a recovery key just made for this account, to show once.
+    SignedIn(Result<(Client, SessionResponse, Secure)>, Option<String>),
     Restored(Result<(Client, User, Secure)>),
     Workspaces(Result<Vec<Workspace>>),
     /// A workspace was created or joined: select it.
     WorkspaceOpened(Result<Workspace>),
+    /// A workspace was deleted by its owner (this person), or refusing to.
+    WorkspaceDeleted(WorkspaceId, Result<()>),
     Channels(WorkspaceId, Result<Vec<Channel>>),
     /// A channel was created, joined or opened as a conversation: select it.
     ChannelOpened(Result<Channel>),

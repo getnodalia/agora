@@ -436,3 +436,44 @@ pub fn ticks(
         }
     }
 }
+
+/// The action that destroys something for good (delete a workspace): filled in the danger colour
+/// with white ink, like the primary button in shape. Kept last in the row, enabled only once the
+/// person has confirmed.
+pub fn danger_button(ui: &mut Ui, look: &Look, text: &str, enabled: bool) -> Response {
+    let p = &look.palette;
+    let ink = if enabled {
+        Color32::WHITE
+    } else {
+        color(p.text_disabled)
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), FontId::proportional(13.0), ink);
+    let width = (galley.size().x + 28.0).max(nodalia_theme::creator::layout::BUTTON_MIN_WIDTH);
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(width, nodalia_theme::creator::layout::BUTTON_HEIGHT),
+        sense,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, enabled && ui.is_enabled(), text)
+    });
+    let fill = match (enabled, response.hovered()) {
+        (false, _) => color(p.control_bg_disabled),
+        (true, true) => color(p.status_danger_fg).gamma_multiply(0.85),
+        (true, false) => color(p.status_danger_fg),
+    };
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(nodalia_theme::creator::layout::CONTROL_RADIUS),
+        fill,
+    );
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, ink);
+    response
+}

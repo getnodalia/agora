@@ -230,6 +230,17 @@ impl Client {
         Ok((self.clone().with_token(session.token.clone()), session))
     }
 
+    /// Choose a new password with the recovery key (or a code from whoever runs the server).
+    /// Signs in, and returns the replacement recovery key.
+    pub async fn reset_password(
+        &self,
+        req: &ResetPasswordRequest,
+    ) -> Result<(Client, SessionResponse, String)> {
+        let reply: ResetPasswordResponse = self.post("/auth/password-reset", req).await?;
+        let client = self.clone().with_token(reply.session.token.clone());
+        Ok((client, reply.session, reply.recovery_key))
+    }
+
     /// End the session on the server. Its WebSockets close.
     pub async fn logout(&self) -> Result<()> {
         self.post::<_, ()>("/auth/logout", &()).await
@@ -277,6 +288,34 @@ impl Client {
             &MfaDisableRequest {
                 password: password.to_owned(),
                 code: code.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Whether the account has a recovery key.
+    pub async fn recovery_status(&self) -> Result<RecoveryStatus> {
+        self.get("/auth/recovery-key").await
+    }
+
+    /// A new recovery key (the old one stops working). Shown once.
+    pub async fn new_recovery_key(&self, password: &str) -> Result<RecoveryKey> {
+        self.post(
+            "/auth/recovery-key",
+            &RecoveryKeyRequest {
+                password: password.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Change the password; every other session is signed out.
+    pub async fn change_password(&self, password: &str, new_password: &str) -> Result<()> {
+        self.post(
+            "/auth/password",
+            &ChangePasswordRequest {
+                password: password.to_owned(),
+                new_password: new_password.to_owned(),
             },
         )
         .await
@@ -515,6 +554,14 @@ impl Client {
             .await
     }
 
+    /// Delete a workspace and everything in it. Only its owner may, and `name` must be the
+    /// workspace's exact name: the server refuses a mistyped confirmation.
+    pub async fn delete_workspace(&self, id: WorkspaceId, name: &str) -> Result<()> {
+        let mut url = self.url(&format!("/workspaces/{id}"))?;
+        url.query_pairs_mut().append_pair("confirm", name);
+        self.send::<(), _>(Method::DELETE, url, None).await
+    }
+
     pub async fn delete_integration(&self, id: i64) -> Result<()> {
         self.send::<(), _>(
             Method::DELETE,
@@ -522,6 +569,11 @@ impl Client {
             None,
         )
         .await
+    }
+
+    /// Post a test notice through an integration, to check the connection from this side.
+    pub async fn test_integration(&self, id: i64) -> Result<()> {
+        self.post(&format!("/integrations/{id}/test"), &()).await
     }
 
     /// The newest notices integrations posted to a channel, oldest first.

@@ -19,6 +19,7 @@ pub mod messages;
 pub mod mfa;
 pub mod mls;
 pub mod organizations;
+pub mod recovery;
 mod rows;
 pub mod tasks;
 pub mod users;

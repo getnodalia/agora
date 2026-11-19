@@ -259,3 +259,49 @@ async fn only_admins_manage_and_only_readers_see() {
     assert_eq!(empty.code(), Some(ErrorCode::Invalid));
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_admin_can_send_a_test_notice_and_nobody_else_can() {
+    let (_dir, db) = temp_db("integrations-test-notice");
+    let server = Server::start(&db).await;
+    let (ana, luis, _eva, ws) = team(&server).await;
+    let general = ana.channels(ws.id).await.unwrap()[0].clone();
+    let created = ana
+        .create_integration(
+            general.id,
+            &CreateIntegrationRequest {
+                kind: IntegrationKind::Hito,
+                name: "Lanzamiento".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let id = created.integration.id;
+    let stranger = Person::register(&server, "marta").await;
+
+    assert_eq!(
+        luis.test_integration(id).await.unwrap_err().code(),
+        Some(ErrorCode::Forbidden)
+    );
+    assert_eq!(
+        stranger.test_integration(id).await.unwrap_err().code(),
+        Some(ErrorCode::NotFound)
+    );
+    assert!(luis.notices(general.id).await.unwrap().is_empty());
+
+    let mut live = Live::open(&luis);
+    live.ready().await;
+    ana.test_integration(id).await.unwrap();
+    let seen = live
+        .server_event(|e| match e {
+            agora_protocol::ServerEvent::IntegrationNotice { notice } => Some(notice.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(seen.integration_id, id);
+    assert_eq!(seen.title.as_deref(), Some("Test notice"));
+    // Testing twice shows two notices: each test is its own.
+    ana.test_integration(id).await.unwrap();
+    assert_eq!(luis.notices(general.id).await.unwrap().len(), 2);
+    server.stop().await;
+}

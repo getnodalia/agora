@@ -327,6 +327,36 @@ impl Model {
         }
     }
 
+    /// Forget a workspace that was deleted, with everything this device kept of it. Selection
+    /// moves to the first workspace left; the caller reloads the rest.
+    pub fn remove_workspace(&mut self, id: WorkspaceId) {
+        let gone: Vec<ChannelId> = self
+            .channels
+            .remove(&id)
+            .unwrap_or_default()
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        self.workspaces.retain(|w| w.id != id);
+        self.members.remove(&id);
+        for channel in &gone {
+            self.conversations.remove(channel);
+            self.devices.remove(channel);
+            self.receipts.remove(channel);
+            self.delivered.remove(channel);
+        }
+        self.pending.retain(|p| !gone.contains(&p.channel));
+        if self.channel.is_some_and(|c| gone.contains(&c)) {
+            self.channel = None;
+            self.thread = None;
+        }
+        if self.workspace == Some(id) {
+            self.workspace = self.workspaces.first().map(|w| w.id);
+            self.channel = None;
+            self.thread = None;
+        }
+    }
+
     pub fn set_channels(&mut self, ws: WorkspaceId, list: Vec<Channel>) {
         if self.channel.is_some_and(|id| {
             self.channel_info(id).is_some_and(|c| c.workspace_id == ws)
@@ -517,6 +547,10 @@ impl Model {
                     self.channel = None;
                     self.thread = None;
                 }
+            }
+            ServerEvent::WorkspaceRemoved { workspace_id } => {
+                self.remove_workspace(workspace_id);
+                effects.push(Effect::RefreshWorkspaces);
             }
             ServerEvent::MemberJoined {
                 workspace_id,
@@ -772,6 +806,34 @@ mod tests {
             vec![channel(10, "general"), channel(11, "random")],
         );
         m
+    }
+
+    #[test]
+    fn a_deleted_workspace_takes_its_channels_and_selection_with_it() {
+        let mut m = model();
+        m.workspaces.push(Workspace {
+            id: WorkspaceId(2),
+            name: "Zeta".into(),
+            role: Role::Member,
+            created_at: 0,
+        });
+        m.set_channels(WorkspaceId(2), vec![channel(20, "general")]);
+        m.open_channel(ChannelId(10));
+        let effects = m.apply(
+            ServerEvent::WorkspaceRemoved {
+                workspace_id: WorkspaceId(1),
+            },
+            0.0,
+        );
+        assert_eq!(effects, [Effect::RefreshWorkspaces]);
+        assert_eq!(m.workspace, Some(WorkspaceId(2)));
+        assert_eq!(m.channel, None);
+        assert!(m.channel_info(ChannelId(10)).is_none());
+        assert!(!m.conversations.contains_key(&ChannelId(10)));
+        assert!(m.channel_info(ChannelId(20)).is_some());
+        // A second removal, as the owner's own reply and the event both arrive, changes nothing.
+        m.remove_workspace(WorkspaceId(1));
+        assert_eq!(m.workspaces.len(), 1);
     }
 
     #[test]
