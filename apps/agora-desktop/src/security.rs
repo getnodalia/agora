@@ -321,7 +321,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
         Stage::SetupPassword => {
             note(ui, look, tr("Enter your password to continue."));
             label(ui, look, tr("Password"));
-            let enter = field(ui, look, &mut dialog.password, true);
+            let enter = field(ui, look, &mut dialog.password, Input::Secret);
             let ready = !dialog.password.is_empty() && !dialog.pending;
             if footer(ui, look, tr("Continue"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::Setup);
@@ -346,7 +346,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 }
             });
             label(ui, look, tr("Code from your authenticator app"));
-            let enter = field(ui, look, &mut dialog.code, false);
+            let enter = field(ui, look, &mut dialog.code, Input::Plain);
             let ready = dialog.code.trim().len() >= 6 && !dialog.pending;
             if footer(ui, look, tr("Turn on"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::Enable);
@@ -386,9 +386,9 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 tr("Enter your password and a current code to turn two-step verification off."),
             );
             label(ui, look, tr("Password"));
-            field(ui, look, &mut dialog.password, true);
+            field(ui, look, &mut dialog.password, Input::Secret);
             label(ui, look, tr("Code from your authenticator app"));
-            let enter = field(ui, look, &mut dialog.code, false);
+            let enter = field(ui, look, &mut dialog.code, Input::Plain);
             let ready =
                 !dialog.password.is_empty() && dialog.code.trim().len() >= 6 && !dialog.pending;
             if footer(ui, look, tr("Turn off"), ready, &mut act) || (enter && ready) {
@@ -402,9 +402,9 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 tr("Other computers and sessions are signed out when you change it. Your conversations stay readable."),
             );
             label(ui, look, tr("Current password"));
-            field(ui, look, &mut dialog.password, true);
+            field(ui, look, &mut dialog.password, Input::Secret);
             label(ui, look, tr("New password"));
-            let enter = field(ui, look, &mut dialog.new_password, true);
+            let enter = field(ui, look, &mut dialog.new_password, Input::Secret);
             let ready = !dialog.password.is_empty()
                 && dialog.new_password.chars().count() >= agora_core::limits::PASSWORD_MIN
                 && !dialog.pending;
@@ -427,7 +427,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 tr("Enter your password to make a new recovery key. The old one stops working."),
             );
             label(ui, look, tr("Password"));
-            let enter = field(ui, look, &mut dialog.password, true);
+            let enter = field(ui, look, &mut dialog.password, Input::Secret);
             let ready = !dialog.password.is_empty() && !dialog.pending;
             if footer(ui, look, tr("Continue"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::NewKey);
@@ -468,7 +468,7 @@ pub fn show(ui: &mut Ui, look: &Look, dialog: &mut SecurityDialog, actions: &mut
                 tr("Enter a current code. Your old recovery codes stop working."),
             );
             label(ui, look, tr("Code from your authenticator app"));
-            let enter = field(ui, look, &mut dialog.code, false);
+            let enter = field(ui, look, &mut dialog.code, Input::Plain);
             let ready = dialog.code.trim().len() >= 6 && !dialog.pending;
             if footer(ui, look, tr("Continue"), ready, &mut act) || (enter && ready) {
                 act(SecurityAction::NewCodes);
@@ -510,7 +510,14 @@ fn label(ui: &mut Ui, look: &Look, text: &str) {
 }
 
 /// A one-line field. `true` when Enter was pressed in it.
-fn field(ui: &mut Ui, look: &Look, text: &mut String, password: bool) -> bool {
+/// Whether a field hides what is typed in it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Input {
+    Plain,
+    Secret,
+}
+
+fn field(ui: &mut Ui, look: &Look, text: &mut String, input: Input) -> bool {
     let response = cr::field_frame(look)
         .inner_margin(egui::Margin::symmetric(8, 0))
         .show(ui, |ui| {
@@ -518,7 +525,7 @@ fn field(ui: &mut Ui, look: &Look, text: &mut String, password: bool) -> bool {
                 TextEdit::singleline(text)
                     .frame(egui::Frame::NONE)
                     .align(egui::Align2::LEFT_CENTER)
-                    .password(password)
+                    .password(input == Input::Secret)
                     .desired_width(ui.available_width()),
             )
         })

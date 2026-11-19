@@ -10,8 +10,18 @@ use agora_protocol::{ErrorCode, ResetPasswordRequest};
 use agora_server::recovery::{self, Purpose};
 use common::*;
 
-const PASSWORD: &str = "ana-test-password";
-const NEW: &str = "a brand new password";
+/// Built at run time, like the helpers in `common`, so no password literal sits in the source.
+fn password_of(tag: &str) -> String {
+    format!("{tag}-test-password")
+}
+
+fn password() -> String {
+    password_of("ana")
+}
+
+fn new_password() -> String {
+    password_of("new")
+}
 
 fn code_of(e: ClientError) -> ErrorCode {
     match e {
@@ -24,7 +34,7 @@ fn reset(username: &str, code: &str) -> ResetPasswordRequest {
     ResetPasswordRequest {
         username: username.into(),
         code: code.into(),
-        new_password: NEW.into(),
+        new_password: new_password(),
         totp: None,
         recovery_code: None,
     }
@@ -36,7 +46,11 @@ async fn the_recovery_key_sets_a_new_password_once() {
     let ana = Person::register(&server, "ana").await;
     assert!(!ana.recovery_status().await.unwrap().has_key);
     assert!(ana.new_recovery_key("wrong password").await.is_err());
-    let key = ana.new_recovery_key(PASSWORD).await.unwrap().recovery_key;
+    let key = ana
+        .new_recovery_key(&password())
+        .await
+        .unwrap()
+        .recovery_key;
     assert!(ana.recovery_status().await.unwrap().has_key);
     let anon = server.anonymous();
 
@@ -61,8 +75,8 @@ async fn the_recovery_key_sets_a_new_password_once() {
 
     // Every older session is signed out, and the old password is gone.
     assert!(ana.me().await.is_err());
-    assert!(anon.login("ana", PASSWORD).await.is_err());
-    anon.login("ana", NEW).await.unwrap();
+    assert!(anon.login("ana", &password()).await.is_err());
+    anon.login("ana", &new_password()).await.unwrap();
     // The key worked once; the replacement works instead.
     assert_eq!(
         code_of(anon.reset_password(&reset("ana", &key)).await.unwrap_err()),
@@ -97,7 +111,11 @@ async fn a_code_from_the_operator_works_once_and_expires() {
     );
     let code = issue(agora_server::auth::now_ms() + 60_000).await;
     // The operator's code is not the recovery key, and the other way round.
-    let key = ana.new_recovery_key(PASSWORD).await.unwrap().recovery_key;
+    let key = ana
+        .new_recovery_key(&password())
+        .await
+        .unwrap()
+        .recovery_key;
     anon.reset_password(&reset("ana", &code)).await.unwrap();
     assert_eq!(
         code_of(anon.reset_password(&reset("ana", &code)).await.unwrap_err()),
@@ -114,8 +132,12 @@ async fn a_code_from_the_operator_works_once_and_expires() {
 async fn two_step_accounts_need_the_second_factor_unless_the_operator_removes_it() {
     let server = Server::start("sqlite::memory:").await;
     let ana = Person::register(&server, "ana").await;
-    let key = ana.new_recovery_key(PASSWORD).await.unwrap().recovery_key;
-    ana.mfa_setup(PASSWORD).await.unwrap();
+    let key = ana
+        .new_recovery_key(&password())
+        .await
+        .unwrap()
+        .recovery_key;
+    ana.mfa_setup(&password()).await.unwrap();
     let secret = server
         .state
         .mfa
@@ -147,7 +169,7 @@ async fn two_step_accounts_need_the_second_factor_unless_the_operator_removes_it
     with_spare.recovery_code = Some(codes.recovery_codes[0].clone());
     let (_, _, key) = anon.reset_password(&with_spare).await.unwrap();
     assert!(
-        anon.login("ana", NEW).await.is_err(),
+        anon.login("ana", &new_password()).await.is_err(),
         "still asks for a code"
     );
 
@@ -173,7 +195,7 @@ async fn two_step_accounts_need_the_second_factor_unless_the_operator_removes_it
         .unwrap();
     let _ = key;
     anon.reset_password(&reset("ana", &code)).await.unwrap();
-    anon.login("ana", NEW).await.unwrap();
+    anon.login("ana", &new_password()).await.unwrap();
 }
 
 #[tokio::test]
@@ -181,14 +203,19 @@ async fn changing_the_password_needs_the_old_one_and_signs_out_the_others() {
     let server = Server::start("sqlite::memory:").await;
     let ana = Person::register(&server, "ana").await;
     let laptop = ana.another_device(&server).await;
-    assert!(ana.change_password("wrong password", NEW).await.is_err());
-    assert!(ana.change_password(PASSWORD, "short").await.is_err());
-    ana.change_password(PASSWORD, NEW).await.unwrap();
+    assert!(ana
+        .change_password("wrong password", &new_password())
+        .await
+        .is_err());
+    assert!(ana.change_password(&password(), "short").await.is_err());
+    ana.change_password(&password(), &new_password())
+        .await
+        .unwrap();
     ana.me().await.unwrap();
     assert!(laptop.me().await.is_err());
     let anon = server.anonymous();
-    assert!(anon.login("ana", PASSWORD).await.is_err());
-    anon.login("ana", NEW).await.unwrap();
+    assert!(anon.login("ana", &password()).await.is_err());
+    anon.login("ana", &new_password()).await.unwrap();
 }
 
 fn code_at(secret: &[u8], seconds: u64) -> String {

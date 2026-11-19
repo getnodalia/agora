@@ -249,7 +249,7 @@ async fn create_reset_code(
         )
         .await?;
     store.close().await;
-    println!("Reset code for {username} (valid for 1 hour, works once): {code}");
+    println!("Reset code (valid for 1 hour, works once): {code}");
     println!(
         "Give it to them privately. They choose \"Forgot your password?\" on the sign-in screen."
     );

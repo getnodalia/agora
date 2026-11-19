@@ -183,7 +183,7 @@ fn form_card(
         field(ui, look, &mut form.username, "", false);
         if form.recover {
             field_label(ui, look, tr("Recovery key or code"));
-            field(ui, look, &mut form.reset_code, "ABCD-EFGH-IJKL-…", false);
+            field(ui, look, &mut form.reset_code, "", false);
         }
         field_label(
             ui,
