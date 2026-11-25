@@ -83,27 +83,113 @@ fn idle(stop: &AtomicBool) {
 }
 
 /// Capture the microphone and hand every 20 ms frame to `frame` while `live` is true.
+///
+/// On macOS a stream opened before the person has answered the system's microphone question
+/// delivers nothing but zeros for as long as it lives, while the menu bar shows the microphone
+/// as in use: the call looks fine and nobody hears anything. So a stream that stays digitally
+/// silent is closed and opened again, which is when the system hands over real sound, and a
+/// microphone that still says nothing after many tries is reported.
 pub fn microphone(
     live: Arc<AtomicBool>,
     report: Report,
-    frame: impl Fn(&[i16]) + Send + 'static,
+    frame: impl Fn(&[i16]) + Send + Sync + 'static,
 ) -> Worker {
     Worker::spawn(move |stop| {
-        let stream = match open_microphone(live, frame) {
-            Ok(stream) => stream,
-            Err(why) => {
-                report(why);
+        let frame = Arc::new(frame);
+        let mut watch = SilenceWatch::default();
+        let mut reported = false;
+        loop {
+            let heard = Arc::new(AtomicBool::new(false));
+            let opened = Instant::now();
+            let stream = {
+                let frame = frame.clone();
+                open_microphone(live.clone(), heard.clone(), move |pcm| frame(pcm))
+            };
+            let stream = match stream {
+                Ok(stream) => stream,
+                Err(why) => {
+                    report(why);
+                    idle(stop);
+                    return;
+                }
+            };
+            // Keep listening until the person leaves, or the stream has been silent too long.
+            let again = loop {
+                if stop.load(Ordering::Relaxed) {
+                    break false;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                if heard.load(Ordering::Relaxed) {
+                    watch = SilenceWatch::default();
+                    continue;
+                }
+                match watch.check(opened.elapsed()) {
+                    SilenceStep::Wait => {}
+                    SilenceStep::Reopen => break true,
+                    SilenceStep::GiveUp => {
+                        if !reported {
+                            reported = true;
+                            report(Problem::because(
+                                Device::Microphone,
+                                "the microphone delivers only silence (check System Settings, Privacy & Security, Microphone)",
+                            ));
+                        }
+                        break false;
+                    }
+                }
+            };
+            drop(stream);
+            if !again {
+                // Gave up or stopped: stay quiet until the call ends.
                 idle(stop);
                 return;
             }
-        };
-        idle(stop);
-        drop(stream);
+            tracing::info!("microphone: silent, opening it again");
+        }
     })
+}
+
+/// How long a freshly opened microphone may stay digitally silent before it is opened again.
+const SILENCE_BEFORE_REOPEN: Duration = Duration::from_millis(2500);
+/// How many times it is opened again (about two minutes, enough to answer the system's question).
+const SILENCE_REOPENS: u32 = 40;
+
+/// What to do about a microphone that has not made a sound since it was opened.
+#[derive(Debug, PartialEq, Eq)]
+enum SilenceStep {
+    Wait,
+    Reopen,
+    GiveUp,
+}
+
+#[derive(Default)]
+struct SilenceWatch {
+    reopened: u32,
+}
+
+impl SilenceWatch {
+    /// `since_open`: how long the current stream has been open without any sound.
+    fn check(&mut self, since_open: Duration) -> SilenceStep {
+        if since_open < SILENCE_BEFORE_REOPEN {
+            return SilenceStep::Wait;
+        }
+        if self.reopened >= SILENCE_REOPENS {
+            return SilenceStep::GiveUp;
+        }
+        self.reopened += 1;
+        SilenceStep::Reopen
+    }
+}
+
+/// Whether a block of samples holds any sound at all. A working microphone is never exactly
+/// zero for long, because of its own noise; a stream the system has muted always is.
+fn has_signal(samples: &[f32]) -> bool {
+    samples.iter().any(|s| *s != 0.0)
 }
 
 fn open_microphone(
     live: Arc<AtomicBool>,
+    heard: Arc<AtomicBool>,
     frame: impl Fn(&[i16]) + Send + 'static,
 ) -> Result<Stream, Problem> {
     let device = cpal::default_host()
@@ -115,6 +201,10 @@ fn open_microphone(
     let (rate, channels) = (config.sample_rate().0, config.channels());
     let capture = Mutex::new(Capture::new(rate, channels));
     let handle = move |samples: &[f32]| {
+        if !heard.load(Ordering::Relaxed) && has_signal(samples) {
+            heard.store(true, Ordering::Relaxed);
+            tracing::info!("microphone: sound is arriving");
+        }
         if !live.load(Ordering::Relaxed) {
             return;
         }
@@ -569,5 +659,26 @@ mod tests {
             highest.fulfill(&listed),
             Some(mode(1280, 720, FrameFormat::YUYV, 30))
         );
+    }
+
+    #[test]
+    fn a_silent_microphone_is_opened_again_and_finally_reported() {
+        let mut watch = SilenceWatch::default();
+        assert_eq!(watch.check(Duration::from_millis(100)), SilenceStep::Wait);
+        assert_eq!(watch.check(SILENCE_BEFORE_REOPEN), SilenceStep::Reopen);
+        for _ in 1..SILENCE_REOPENS {
+            assert_eq!(watch.check(SILENCE_BEFORE_REOPEN), SilenceStep::Reopen);
+        }
+        assert_eq!(watch.check(SILENCE_BEFORE_REOPEN), SilenceStep::GiveUp);
+        // A stream that was only just opened still waits, even after giving up on earlier ones.
+        assert_eq!(watch.check(Duration::from_millis(10)), SilenceStep::Wait);
+    }
+
+    #[test]
+    fn only_a_block_with_some_sound_counts_as_heard() {
+        assert!(!has_signal(&[]));
+        assert!(!has_signal(&[0.0; 480]));
+        assert!(has_signal(&[0.0, 0.0, 1e-6]));
+        assert!(has_signal(&[-0.2]));
     }
 }
