@@ -128,10 +128,13 @@ impl Mixer {
     pub const MAX: usize = 6400;
 
     pub fn push(&mut self, from: UserId, samples: &[f32]) {
-        let voice = self.voices.entry(from).or_insert_with(|| Voice {
-            queue: VecDeque::new(),
-            pos: 0.0,
-            playing: false,
+        let voice = self.voices.entry(from).or_insert_with(|| {
+            tracing::info!("call: sound is arriving from {from}");
+            Voice {
+                queue: VecDeque::new(),
+                pos: 0.0,
+                playing: false,
+            }
         });
         voice.queue.extend(samples.iter().copied());
         while voice.queue.len() > Mixer::MAX {
