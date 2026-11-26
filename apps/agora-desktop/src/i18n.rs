@@ -560,6 +560,40 @@ mod tests {
         }
     }
 
+    /// The English literal each `tr(` / `trf(` call takes, wherever the call
+    /// breaks its line: rustfmt moves a long literal below the parenthesis.
+    fn literal_arguments(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for marker in ["tr(", "trf("] {
+            for (at, _) in text.match_indices(marker) {
+                let before = text[..at].chars().next_back();
+                if before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+                    continue;
+                }
+                let rest = text[at + marker.len()..].trim_start();
+                let Some(rest) = rest.strip_prefix('"') else {
+                    continue;
+                };
+                let mut end = None;
+                let mut escaped = false;
+                for (i, c) in rest.char_indices() {
+                    if escaped {
+                        escaped = false;
+                    } else if c == '\\' {
+                        escaped = true;
+                    } else if c == '"' {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                if let Some(end) = end {
+                    found.push(rest[..end].to_string());
+                }
+            }
+        }
+        found
+    }
+
     #[test]
     fn every_interface_string_has_spanish() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -576,18 +610,12 @@ mod tests {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).unwrap();
-                for marker in ["tr(\"", "trf(\""] {
-                    for piece in text.split(marker).skip(1) {
-                        let Some(end) = piece.find("\"") else {
-                            continue;
-                        };
-                        let english = &piece[..end];
-                        if SPANISH
-                            .binary_search_by(|(en, _)| en.cmp(&english))
-                            .is_err()
-                        {
-                            missing.push(format!("{}: {english}", path.display()));
-                        }
+                for english in literal_arguments(&text) {
+                    if SPANISH
+                        .binary_search_by(|(en, _)| en.cmp(&english.as_str()))
+                        .is_err()
+                    {
+                        missing.push(format!("{}: {english}", path.display()));
                     }
                 }
             }
