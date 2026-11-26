@@ -21,7 +21,8 @@ use nodalia_theme::for_egui::color;
 use crate::app::Action;
 use crate::i18n::{tr, trf};
 use crate::net::{Net, Reply, Result};
-use crate::signin::status_line;
+use nodalia_theme::enterprise::integrations::{self as ndl, heading, note, numbered};
+use nodalia_theme::enterprise::status_line;
 
 /// The address and key of an integration just made. Shown once.
 #[derive(Clone, Debug)]
@@ -307,25 +308,6 @@ fn tab_bar(
     ui.add_space(8.0);
 }
 
-/// A card on the dialog's surface: one step darker than the dialog, with a hairline.
-fn card(look: &Look) -> egui::Frame {
-    let p = &look.palette;
-    egui::Frame::NONE
-        .fill(color(p.surface_window))
-        .stroke(egui::Stroke::new(1.0, color(p.border_subtle)))
-        .corner_radius(egui::CornerRadius::same(10))
-}
-
-fn heading(ui: &mut Ui, look: &Look, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .size(font_size::LARGE)
-            .strong()
-            .color(color(look.palette.text_primary)),
-    );
-    ui.add_space(4.0);
-}
-
 /// "Step n of 3" and a thin track, so the person knows how far the flow goes.
 fn progress(ui: &mut Ui, look: &Look, step: usize, label: &str) {
     ui.label(
@@ -353,7 +335,7 @@ fn list_view(
             ui.spinner();
         }
         Some(list) if list.is_empty() => {
-            card(look).inner_margin(14).show(ui, |ui| {
+            ndl::card_frame(look).inner_margin(14).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
                     RichText::new(tr("Nothing is connected to this channel yet."))
@@ -401,7 +383,7 @@ fn integration_card(
     wanted: &mut Vec<IntegrationsAction>,
 ) {
     let p = &look.palette;
-    card(look).inner_margin(12).show(ui, |ui| {
+    ndl::card_frame(look).inner_margin(12).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             crate::widgets::icon(
@@ -740,7 +722,7 @@ fn created_view(
         }
     }
     ui.add_space(10.0);
-    card(look).inner_margin(12).show(ui, |ui| {
+    ndl::card_frame(look).inner_margin(12).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(
             RichText::new(tr("Check it works"))
@@ -786,58 +768,9 @@ fn example_command(created: &Created) -> String {
     )
 }
 
-/// A step of the instructions: its number in a disc, then the text beside it.
-fn numbered(ui: &mut Ui, look: &Look, n: usize, text: &str) {
-    let p = &look.palette;
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), egui::Sense::hover());
-        ui.painter()
-            .circle_filled(rect.center(), 10.0, color(p.accent_default));
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            n.to_string(),
-            egui::FontId::proportional(11.0),
-            color(p.text_on_accent),
-        );
-        ui.add(egui::Label::new(RichText::new(text).color(color(p.text_primary))).wrap());
-    });
-}
-
+/// A value to copy under its label; Copy puts it on the clipboard through the app.
 fn copy_row(ui: &mut Ui, look: &Look, label: &str, value: &str, actions: &mut Vec<Action>) {
-    let p = &look.palette;
-    ui.add_space(2.0);
-    cr::field_frame(look)
-        .inner_margin(egui::Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(
-                RichText::new(label)
-                    .size(font_size::CAPTION)
-                    .color(color(p.text_tertiary)),
-            );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(value)
-                        .monospace()
-                        .size(font_size::CAPTION)
-                        .color(color(p.text_primary)),
-                )
-                .wrap(),
-            );
-            ui.add_space(2.0);
-            if ui.small_button(tr("Copy")).clicked() {
-                actions.push(Action::Copy(value.to_owned()));
-            }
-        });
-}
-
-fn note(ui: &mut Ui, look: &Look, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .size(font_size::SMALL)
-            .color(color(look.palette.text_secondary)),
-    );
-    ui.add_space(6.0);
+    if ndl::copy_row(ui, look, label, value, tr("Copy")) {
+        actions.push(Action::Copy(value.to_owned()));
+    }
 }

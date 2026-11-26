@@ -1,6 +1,6 @@
 # Nodalia migration: Ágora
 
-Category: secondary app (new, built for Nodalia from the start).
+Category: Enterprise suite (new, built for Nodalia from the start).
 Status: first working version on a pull request, 2026-11-15. Not released.
 
 ## Current state
@@ -21,14 +21,16 @@ None: Ágora has no upstream.
 
 ## Reusable Nodalia components
 
-- `nodalia-theme` (egui, `creator` feature): palette with `Accent::Agora` (`#0F7C80`), islands,
-  buttons, fields, window controls, icons.
+- `nodalia-theme` (egui, `creator` and `enterprise` features): palette with `Accent::Agora`
+  (`#0F7C80`), islands, buttons, fields, window controls, icons, and the Enterprise suite's window,
+  top bar, sidebar, sign-in, integration pieces and language picker (shared with Hito).
+- `nodalia-update` with `Style::Enterprise` for the update window.
 - `tools/app-portrait` in nodalia-design made the icon.
 
 ## NDL work pending
 
-- `creator::search_field` draws its text at the top of a tall field; Ágora draws its own centred
-  copy (`widgets::search_field`) until nodalia-design centres it.
+- Done: the Enterprise suite's shared window, sidebar, sign-in, About and update window come from
+  nodalia-design (`enterprise` module); Ágora keeps only its own pieces.
 - An emoji picker and a chat message list are drawn in Ágora; if another app needs them, they move
   to nodalia-design.
 - Done: the Linux global menu over D-Bus (`linux_menu.rs`, as Toma and Pluma do). Ágora has no

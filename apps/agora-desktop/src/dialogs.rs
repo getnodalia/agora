@@ -798,11 +798,19 @@ fn preferences(ui: &mut Ui, settings: &mut Settings, look: &Look, actions: &mut 
         });
     }
     heading(ui, tr("Language"));
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut settings.language, None, tr("System"));
-        ui.selectable_value(&mut settings.language, Some(Lang::Es), Lang::Es.name());
-        ui.selectable_value(&mut settings.language, Some(Lang::En), Lang::En.name());
-    });
+    {
+        let choices = [None, Some(Lang::Es), Some(Lang::En)];
+        let names = [tr("System"), Lang::Es.name(), Lang::En.name()];
+        let at = choices.iter().position(|c| *c == settings.language);
+        let current = at.and_then(|i| names.get(i)).copied().unwrap_or("");
+        if let Some(picked) =
+            nodalia_theme::enterprise::picker(ui, look, "language", current, &names, at, 220.0)
+        {
+            if let Some(choice) = choices.get(picked) {
+                settings.language = *choice;
+            }
+        }
+    }
     heading(ui, tr("Account"));
     ui.checkbox(
         &mut settings.remember,
@@ -824,27 +832,49 @@ fn preferences(ui: &mut Ui, settings: &mut Settings, look: &Look, actions: &mut 
 }
 
 fn about(ui: &mut Ui, look: &Look) {
+    use nodalia_theme::about::{self as ndl_about, Info, Link};
     let p = &look.palette;
+    let version = trf("Version {}", &[env!("CARGO_PKG_VERSION")]);
+    let links = [
+        Link {
+            label: tr("Website"),
+            url: "https://getnodalia.com/agora",
+        },
+        Link {
+            label: "GitHub",
+            url: "https://github.com/getnodalia/agora",
+        },
+        Link {
+            label: tr("Report an issue"),
+            url: "https://github.com/getnodalia/agora/issues",
+        },
+    ];
+    let info = Info {
+        name: "Ágora",
+        version: &version,
+        tagline: tr("Open source, self-hosted team chat."),
+        suite: tr("Part of Nodalia · Enterprise"),
+        links: &links,
+        footer: "MIT OR Apache-2.0 · © Nodalia",
+    };
+    let texture = crate::icon::texture(ui.ctx());
+    let page = ndl_about::page(ui, look, &info, |ui, rect| {
+        egui::Image::new(&texture)
+            .fit_to_exact_size(rect.size())
+            .corner_radius(egui::CornerRadius::same((rect.width() * 0.22) as u8))
+            .paint_at(ui, rect);
+    });
+    if let Some(link) = page.picked.and_then(|i| links.get(i)) {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(link.url));
+    }
     ui.vertical_centered(|ui| {
-        view::logo(ui, look, 96.0);
-        ui.add_space(8.0);
-        ui.label(RichText::new("Ágora").size(font_size::HEADLINE).strong().color(color(p.text_primary)));
-        ui.label(RichText::new(trf("Version {}", &[env!("CARGO_PKG_VERSION")])).color(color(p.text_secondary)));
-        ui.add_space(8.0);
-        ui.label(RichText::new(tr("Open source, self-hosted team chat.")).color(color(p.text_primary)));
-        ui.label(RichText::new(tr("Everything that happens here stays on your server.")).color(color(p.text_secondary)));
-        ui.add_space(8.0);
         ui.label(
             RichText::new(tr("Messages are end-to-end encrypted with MLS: the server stores only ciphertext. Use TLS (https) for any server outside your computer."))
                 .size(font_size::SMALL)
                 .color(color(p.status_warning_fg)),
         );
-        ui.add_space(8.0);
-        ui.label(RichText::new(tr("Accent, typefaces, icons and window controls come from the Nodalia Design Language.")).size(font_size::SMALL).color(color(p.text_secondary)));
-        ui.add_space(8.0);
-        ui.label(RichText::new("MIT OR Apache-2.0 · © Nodalia").size(font_size::SMALL).color(color(p.text_secondary)));
+        ui.add_space(6.0);
         ui.label(RichText::new(crate::icon::CREDIT).size(font_size::CAPTION).color(color(p.text_tertiary)));
-        ui.hyperlink_to("github.com/getnodalia/agora", "https://github.com/getnodalia/agora");
     });
     let _ = i18n::current();
 }

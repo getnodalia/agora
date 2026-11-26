@@ -40,7 +40,8 @@ channels, direct messages, threads, reactions, mentions, unread markers and sear
 you run yourself. The server is one Rust binary with a SQLite file and needs no outside service.
 The desktop app is native (egui, no Electron, no Chromium, no web view) for Linux, macOS and
 Windows, and wears Nodalia Design: rounded islands on the window colour, a hamburger menu, and
-the suite's own window controls on Linux (macOS and Windows keep their native ones).
+the suite's own window controls on Linux (macOS and Windows keep their native ones). It is part of
+Nodalia **Enterprise**, the suite of tools for companies, with Hito.
 
 Every channel and direct message is **end-to-end encrypted** with MLS (RFC 9420): the server
 stores only ciphertext.
@@ -227,7 +228,7 @@ portrait comes from a photograph of the marble bust in the Louvre, cut out in bl
 
 Ágora is one of the applications of [Nodalia](https://getnodalia.com)
 ([GitHub](https://github.com/getnodalia)), an independent software project developed in public
-by [Daniel Miguel Tejedor](https://danielmigueltejedor.com). It shares the Nodalia Design
+by [Daniel Miguel Tejedor](https://danielmigueltejedor.com). It belongs to the Enterprise suite and shares the Nodalia Design
 Language from [nodalia-design](https://github.com/getnodalia/nodalia-design) and Nodalia's
 engineering rules from [getnodalia/foundation](https://github.com/getnodalia/foundation).
 

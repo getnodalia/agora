@@ -13,7 +13,7 @@ use nodalia_theme::for_egui::color;
 use crate::app::Action;
 use crate::i18n::{tr, trf};
 use crate::net::{Net, Reply, Result};
-use crate::signin::status_line;
+use nodalia_theme::enterprise::status_line;
 
 #[derive(Clone, Debug, Default)]
 pub enum Stage {
