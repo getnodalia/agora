@@ -72,8 +72,12 @@ display, run it under `Xvfb` and drive it with `xdotool`. Linux needs `libxkbcom
 
 ## NDL
 
-`nodalia-theme` comes from getnodalia/nodalia-design, pinned by `rev` with the `egui` and
-`creator` features. It supplies the palette (`Accent::Agora`), islands, buttons, fields, window
+Ágora belongs to the **Enterprise suite** of the Nodalia Design Language (`docs/suites/enterprise.md`
+in nodalia-design), with Hito and the customer, resource and finance apps to come: the window shell,
+top bar, sidebar, sign-in, integrations, language picker, About line and update window are
+`nodalia_theme::enterprise`, shared with Hito, never copied here.
+`nodalia-theme` comes from getnodalia/nodalia-design, pinned by `rev` with the `egui`, `creator` and
+`enterprise` features. It supplies the palette (`Accent::Agora`), islands, buttons, fields, window
 controls and icons. Never copy NDL into this repository. A missing component goes to
 nodalia-design through its own pull request first. NDL window controls are drawn on Linux only
 (unless the person picks the system's own in Preferences). macOS and Windows keep native

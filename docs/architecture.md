@@ -55,8 +55,8 @@ checks group ids and epochs from the MLS headers and keeps the log; it holds no 
 - `model.rs` is the signed-in state and a reducer for server events (pure, unit-tested): messages
   land once and in order, the optimistic copy of a sent message is replaced by the server's,
   unread counts only grow for what nobody has seen, threads and reactions update every copy.
-- `view.rs`, `signin.rs`, `dialogs.rs` draw with egui and `nodalia_theme` (palette, creator-suite
-  islands, buttons, fields, icons, window controls) and return `Action`s that `app.rs` carries
+- `view.rs`, `signin.rs`, `dialogs.rs` draw with egui and `nodalia_theme` (palette, the Enterprise suite's
+  window, top bar, sidebar, sign-in and integration pieces, islands, buttons, fields, icons, window controls) and return `Action`s that `app.rs` carries
   out after the frame.
 - Settings, the optional saved session and the device file (keys and decrypted text) live in the
   config folder, written owner-only. Real-time events are decrypted in order before the window

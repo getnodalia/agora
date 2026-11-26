@@ -2,17 +2,16 @@
 //! messages. Centre: the conversation and the composer. Right (optional): details, a thread or
 //! search results.
 
-use std::sync::Arc;
-
 use agora_core::{ChannelId, ChannelKind, MessageId, UserId};
 use agora_protocol::{Channel, IntegrationNotice, Message, Reaction, Timestamp};
 use egui::{
     pos2, vec2, Align, Color32, CornerRadius, Id, Key, Layout, Margin, Modifiers, Rect, RichText,
     Sense, Stroke, TextEdit, Ui, UiBuilder,
 };
-use nodalia_theme::creator::{self as cr, layout, Look};
+use nodalia_theme::creator::{self as cr, Look};
+use nodalia_theme::enterprise::{self as ent, Account, Count, Panes, Row, Tone};
 use nodalia_theme::for_egui::color;
-use nodalia_theme::{font_size, Mode};
+use nodalia_theme::{font_size, window_controls, Mode};
 
 use crate::app::{Action, App, Main, Panel, Screen};
 use crate::chrome;
@@ -21,8 +20,6 @@ use crate::i18n::{tr, trf};
 use crate::model::{peer_name, Connection, Model, Pending};
 use crate::widgets::{self, avatar, badge, icon, icon_button};
 
-const SIDEBAR: f32 = 260.0;
-const CONTEXT: f32 = 300.0;
 /// Messages by the same person closer than this share one header.
 const GROUP_MS: i64 = 5 * 60 * 1000;
 pub const QUICK_REACTIONS: [&str; 8] = ["👍", "❤", "😂", "🎉", "👀", "🙏", "✅", "🔥"];
@@ -46,35 +43,26 @@ pub fn show(ui: &mut Ui, app: &mut App, now: f64) -> Vec<Action> {
         };
         shortcuts(&ctx, main, &mut actions);
 
-        let bar = full.with_max_y(full.top() + layout::APP_BAR);
-        top_bar(ui, bar, main, &look, mode, ndl, panel_open, &mut actions);
-
-        let gap = layout::GAP;
-        let body = Rect::from_min_max(
-            pos2(full.left() + gap, bar.bottom()),
-            pos2(full.right() - gap, full.bottom() - gap),
-        );
-        let side = Rect::from_min_max(body.min, pos2(body.left() + SIDEBAR, body.bottom()));
-        let show_context = panel_open && body.width() > SIDEBAR + CONTEXT + 360.0;
-        let right = Rect::from_min_max(pos2(body.right() - CONTEXT, body.top()), body.max);
-        let center_right = if show_context {
-            right.left() - gap
-        } else {
-            body.right()
-        };
-        let center = Rect::from_min_max(
-            pos2(side.right() + gap, body.top()),
-            pos2(center_right, body.bottom()),
+        let panes = Panes::new(full, panel_open.then_some(ent::layout::DETAIL));
+        top_bar(
+            ui,
+            panes.bar,
+            main,
+            &look,
+            mode,
+            ndl,
+            panel_open,
+            &mut actions,
         );
 
-        island(ui, &look, side, "sidebar", |ui| {
+        ent::island(ui, &look, panes.side, "sidebar", |ui| {
             sidebar(ui, main, &look, &mut actions)
         });
-        island(ui, &look, center, "center", |ui| {
+        ent::island(ui, &look, panes.center, "center", |ui| {
             conversation(ui, main, &look, now, &mut actions)
         });
-        if show_context {
-            island(ui, &look, right, "context", |ui| {
+        if let Some(detail) = panes.detail {
+            ent::island(ui, &look, detail, "context", |ui| {
                 context_panel(ui, main, &look, now, &mut actions)
             });
         }
@@ -85,16 +73,6 @@ pub fn show(ui: &mut Ui, app: &mut App, now: f64) -> Vec<Action> {
         chrome::resize_edges(ui, full);
     }
     actions
-}
-
-fn island(ui: &mut Ui, look: &Look, rect: Rect, id: &str, add: impl FnOnce(&mut Ui)) {
-    ui.scope_builder(UiBuilder::new().max_rect(rect).id_salt(id), |ui| {
-        cr::island(look).show(ui, |ui| {
-            ui.set_min_size(rect.size());
-            ui.set_max_size(rect.size());
-            add(ui);
-        });
-    });
 }
 
 fn shortcuts(ctx: &egui::Context, main: &mut Main, actions: &mut Vec<Action>) {
@@ -147,284 +125,179 @@ fn top_bar(
     panel_open: bool,
     actions: &mut Vec<Action>,
 ) {
-    let p = &look.palette;
-    if chrome::drags_window(ndl) {
-        chrome::drag_area(ui, bar);
-    }
-    // Controls at the left (the desktop's choice on Linux) take the bar's first stretch.
-    let controls_left = ndl && chrome::side() == nodalia_theme::titlebar::Side::Left;
-    let right_reserved = if ndl && !controls_left {
-        chrome::CONTROLS_WIDTH
-    } else {
-        layout::GAP
+    let labels = window_controls::Labels {
+        minimize: tr("Minimize"),
+        maximize: tr("Maximize"),
+        restore: tr("Restore"),
+        close: tr("Close"),
     };
-    let left_reserved = if controls_left {
-        chrome::CONTROLS_WIDTH + layout::GAP
-    } else {
-        layout::GAP + chrome::leading_inset()
-    };
-    let inner = Rect::from_min_max(
-        pos2(bar.left() + left_reserved, bar.top()),
-        pos2(bar.right() - right_reserved, bar.bottom()),
-    );
-    ui.scope_builder(
-        UiBuilder::new()
-            .max_rect(inner)
-            .layout(Layout::left_to_right(Align::Center)),
-        |ui| {
-            let menu = icon_button(ui, look, "menu", tr("Main menu"), false);
-            egui::Popup::menu(&menu).show(|ui| {
-                ui.set_min_width(200.0);
-                if ui.button(tr("Preferences")).clicked() {
-                    actions.push(Action::Dialog(Dialog::Preferences));
-                }
-                if ui.button(tr("Keyboard shortcuts")).clicked() {
-                    actions.push(Action::Dialog(Dialog::Shortcuts));
-                }
-                if ui.button(tr("About Ágora")).clicked() {
-                    actions.push(Action::Dialog(Dialog::About));
-                }
-                if ui.button(tr("Check for updates…")).clicked() {
-                    actions.push(Action::CheckForUpdates);
-                }
-                if ui.button(tr("Security and devices")).clicked() {
-                    actions.push(Action::Security(crate::security::SecurityAction::Load));
-                }
-                ui.separator();
-                if ui.button(tr("Log out")).clicked() {
-                    actions.push(Action::Logout);
-                }
-                if ui.button(tr("Log out and forget this computer")).clicked() {
-                    actions.push(Action::LogoutForget);
-                }
-            });
-            ui.add_space(4.0);
-            logo(ui, look, 22.0);
-            ui.label(
-                RichText::new("Ágora")
-                    .strong()
-                    .size(font_size::LARGE)
-                    .color(color(p.text_primary)),
-            );
+    ent::top_bar(ui, look, mode, ndl, bar, labels, |ui| {
+        ent::main_menu(ui, look, tr("Main menu"), |ui| {
+            if ui.button(tr("Preferences")).clicked() {
+                actions.push(Action::Dialog(Dialog::Preferences));
+            }
+            if ui.button(tr("Keyboard shortcuts")).clicked() {
+                actions.push(Action::Dialog(Dialog::Shortcuts));
+            }
+            if ui.button(tr("About Ágora")).clicked() {
+                actions.push(Action::Dialog(Dialog::About));
+            }
+            if ui.button(tr("Check for updates…")).clicked() {
+                actions.push(Action::CheckForUpdates);
+            }
+            if ui.button(tr("Security and devices")).clicked() {
+                actions.push(Action::Security(crate::security::SecurityAction::Load));
+            }
+            ui.separator();
+            if ui.button(tr("Log out")).clicked() {
+                actions.push(Action::Logout);
+            }
+            if ui.button(tr("Log out and forget this computer")).clicked() {
+                actions.push(Action::LogoutForget);
+            }
+        });
+        ent::brand(ui, look, &crate::icon::texture(ui.ctx()), "Ágora");
 
-            // Search, centred in what is left.
-            let rest = ui.available_width();
-            let width = (rest - 220.0).clamp(160.0, 420.0);
-            ui.add_space(((rest - width) / 2.0 - 110.0).max(8.0));
-            let response = crate::widgets::search_field(
+        let response = ent::bar_search(ui, look, &mut main.search, tr("Search messages"), 220.0);
+        if main.focus_search {
+            response.request_focus();
+            main.focus_search = false;
+        }
+        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+            actions.push(Action::Search);
+        }
+
+        ent::trailing(ui, |ui| {
+            let toggle = icon_button(
                 ui,
                 look,
-                &mut main.search,
-                tr("Search messages"),
-                width,
+                "panel-right",
+                tr("Show or hide the details panel"),
+                panel_open,
             );
-            if main.focus_search {
-                response.request_focus();
-                main.focus_search = false;
+            if toggle.clicked() {
+                actions.push(Action::TogglePanel);
             }
-            if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                actions.push(Action::Search);
-            }
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let toggle = icon_button(
-                    ui,
-                    look,
-                    "panel-right",
-                    tr("Show or hide the details panel"),
-                    panel_open,
-                );
-                if toggle.clicked() {
-                    actions.push(Action::TogglePanel);
-                }
-                ui.add_space(4.0);
-                connection_pill(ui, look, &main.model.connection);
-            });
-        },
-    );
-    if ndl {
-        chrome::controls(ui, bar, p, mode);
-    }
+            ui.add_space(4.0);
+            connection_pill(ui, look, &main.model.connection);
+        });
+    });
 }
 
 fn connection_pill(ui: &mut Ui, look: &Look, connection: &Connection) {
-    let p = &look.palette;
-    let (text, fg, bg) = match connection {
-        Connection::Connected => (
-            tr("Connected").to_string(),
-            p.status_success_fg,
-            p.status_success_bg,
-        ),
-        Connection::Connecting => (
-            tr("Connecting…").to_string(),
-            p.status_info_fg,
-            p.status_info_bg,
-        ),
+    let (tone, text) = match connection {
+        Connection::Connected => (Tone::Success, tr("Connected").to_string()),
+        Connection::Connecting => (Tone::Info, tr("Connecting…").to_string()),
         Connection::Retrying(s) => (
+            Tone::Warning,
             trf("Disconnected. Retrying in {} s.", &[&s.to_string()]),
-            p.status_warning_fg,
-            p.status_warning_bg,
         ),
     };
-    egui::Frame::NONE
-        .fill(color(bg))
-        .corner_radius(CornerRadius::same(12))
-        .inner_margin(Margin::symmetric(10, 3))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (dot, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-                ui.painter().circle_filled(dot.center(), 4.0, color(fg));
-                ui.label(RichText::new(text).size(font_size::SMALL).color(color(fg)));
-            });
-        });
+    ent::status_pill(ui, look, tone, &text);
 }
 
 /// The app icon, drawn from the embedded PNG.
 pub fn logo(ui: &mut Ui, _look: &Look, size: f32) {
-    let texture = crate::icon::texture(ui.ctx());
-    ui.add(
-        egui::Image::new(&texture)
-            .fit_to_exact_size(vec2(size, size))
-            .corner_radius(CornerRadius::same((size * 0.22) as u8)),
-    );
+    ent::logo(ui, &crate::icon::texture(ui.ctx()), size);
 }
 
 // --- Sidebar -----------------------------------------------------------------------------------
 
 fn sidebar(ui: &mut Ui, main: &mut Main, look: &Look, actions: &mut Vec<Action>) {
-    let p = &look.palette;
-    let full = ui.max_rect();
-    let footer_h = 52.0;
-    let top = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - footer_h));
-    let footer = Rect::from_min_max(pos2(full.left(), full.bottom() - footer_h), full.max);
-
-    ui.scope_builder(
-        UiBuilder::new().max_rect(top.shrink2(vec2(8.0, 8.0))),
-        |ui| {
-            workspace_switcher(ui, &main.model, look, actions);
-            ui.add_space(6.0);
-            let Some(ws) = main.model.current_workspace().cloned() else {
-                return;
-            };
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let (rooms, direct) = main.model.sidebar();
-                    section(
+    let me = &main.model.me;
+    let online = main.model.connection == Connection::Connected;
+    let state = if online { tr("Online") } else { tr("Offline") };
+    let detail = format!("@{} · {state}", me.username);
+    let account = Account {
+        seed: me.id.0,
+        name: &me.display_name,
+        detail: &detail,
+        online: Some(online),
+    };
+    ent::sidebar(ui, look, &account, |ui| {
+        workspace_switcher(ui, &main.model, look, actions);
+        ui.add_space(6.0);
+        let Some(ws) = main.model.current_workspace().cloned() else {
+            return;
+        };
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let (rooms, direct) = main.model.sidebar();
+                let create = if ws.role.can_create_channel() {
+                    Some(tr("Create a channel"))
+                } else {
+                    None
+                };
+                if ent::section_heading(ui, look, tr("Channels"), create) {
+                    actions.push(Action::Dialog(Dialog::create_channel()));
+                }
+                for c in rooms {
+                    let kind = if c.kind == ChannelKind::Private {
+                        "lock"
+                    } else {
+                        "hash"
+                    };
+                    let selected = main.model.channel == Some(c.id);
+                    let r = channel_row(
                         ui,
                         look,
-                        tr("Channels"),
-                        ws.role.can_create_channel(),
-                        tr("Create a channel"),
-                        || {
-                            actions.push(Action::Dialog(Dialog::create_channel()));
-                        },
+                        Row::new(&c.name).icon(kind),
+                        selected,
+                        c.unread,
+                        c.mentions,
                     );
-                    for c in rooms {
-                        let kind = if c.kind == ChannelKind::Private {
-                            "lock"
-                        } else {
-                            "hash"
-                        };
-                        let r = channel_row(
-                            ui,
-                            look,
-                            RowIcon::Icon(kind),
-                            &c.name,
-                            main.model.channel == Some(c.id),
-                            c.unread,
-                            c.mentions,
-                            false,
-                        );
-                        if r.clicked() {
-                            actions.push(Action::SelectChannel(c.id));
-                        }
+                    if r.clicked() {
+                        actions.push(Action::SelectChannel(c.id));
                     }
-                    for c in main.model.browsable() {
-                        if main.model.channel == Some(c.id) {
-                            continue;
-                        }
-                        let r = channel_row(
-                            ui,
-                            look,
-                            RowIcon::Icon("hash"),
-                            &c.name,
-                            false,
-                            0,
-                            0,
-                            true,
-                        );
-                        if r.clicked() {
-                            actions.push(Action::SelectChannel(c.id));
-                        }
+                }
+                for c in main.model.browsable() {
+                    if main.model.channel == Some(c.id) {
+                        continue;
                     }
-                    ui.add_space(10.0);
-                    section(
+                    let r = channel_row(
                         ui,
                         look,
-                        tr("Direct messages"),
-                        true,
-                        tr("New direct message"),
-                        || {
-                            actions.push(Action::Dialog(Dialog::NewDirect {
-                                filter: String::new(),
-                            }));
-                        },
+                        Row::new(&c.name).icon("hash").muted(true),
+                        false,
+                        0,
+                        0,
                     );
-                    for c in direct {
-                        let peer = c.peer.as_ref();
-                        let online = peer.map(|u| main.model.online.contains(&u.id));
-                        let seed = peer.map_or(c.id.0, |u| u.id.0);
-                        let name = peer_name(c);
-                        let r = channel_row(
-                            ui,
-                            look,
-                            RowIcon::Avatar(seed, online),
-                            &name,
-                            main.model.channel == Some(c.id),
-                            c.unread,
-                            c.mentions,
-                            false,
-                        );
-                        if r.clicked() {
-                            actions.push(Action::SelectChannel(c.id));
-                        }
+                    if r.clicked() {
+                        actions.push(Action::SelectChannel(c.id));
                     }
-                });
-        },
-    );
-
-    ui.painter().line_segment(
-        [
-            pos2(footer.left() + 12.0, footer.top()),
-            pos2(footer.right() - 12.0, footer.top()),
-        ],
-        Stroke::new(1.0, color(p.border_subtle)),
-    );
-    ui.scope_builder(
-        UiBuilder::new()
-            .max_rect(footer.shrink2(vec2(12.0, 8.0)))
-            .layout(Layout::left_to_right(Align::Center)),
-        |ui| {
-            let me = &main.model.me;
-            let online = main.model.connection == Connection::Connected;
-            avatar(ui, look, me.id.0, &me.display_name, 30.0, Some(online));
-            ui.add_space(6.0);
-            ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(&me.display_name)
-                        .strong()
-                        .color(color(p.text_primary)),
-                );
-                let state = if online { tr("Online") } else { tr("Offline") };
-                ui.label(
-                    RichText::new(format!("@{} · {state}", me.username))
-                        .size(font_size::CAPTION)
-                        .color(color(p.text_secondary)),
-                );
+                }
+                ui.add_space(10.0);
+                if ent::section_heading(
+                    ui,
+                    look,
+                    tr("Direct messages"),
+                    Some(tr("New direct message")),
+                ) {
+                    actions.push(Action::Dialog(Dialog::NewDirect {
+                        filter: String::new(),
+                    }));
+                }
+                for c in direct {
+                    let peer = c.peer.as_ref();
+                    let online = peer.map(|u| main.model.online.contains(&u.id));
+                    let seed = peer.map_or(c.id.0, |u| u.id.0);
+                    let name = peer_name(c);
+                    let selected = main.model.channel == Some(c.id);
+                    let r = channel_row(
+                        ui,
+                        look,
+                        Row::new(&name).avatar(seed, online),
+                        selected,
+                        c.unread,
+                        c.mentions,
+                    );
+                    if r.clicked() {
+                        actions.push(Action::SelectChannel(c.id));
+                    }
+                }
             });
-        },
-    );
+    });
 }
 
 fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec<Action>) {
@@ -432,49 +305,7 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
     let name = model
         .current_workspace()
         .map_or(tr("Workspaces").to_string(), |w| w.name.clone());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
-    let fill = if response.hovered() {
-        color(p.control_bg_hover)
-    } else {
-        Color32::TRANSPARENT
-    };
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(layout::CONTROL_RADIUS), fill);
-    let tile = Rect::from_min_size(rect.min + vec2(6.0, 6.0), vec2(28.0, 28.0));
-    ui.painter()
-        .rect_filled(tile, CornerRadius::same(8), color(p.accent_default));
-    let initial: String = name
-        .chars()
-        .next()
-        .map(|c| c.to_uppercase().collect())
-        .unwrap_or_default();
-    ui.painter().text(
-        tile.center(),
-        egui::Align2::CENTER_CENTER,
-        initial,
-        egui::FontId::proportional(15.0),
-        color(p.text_on_accent),
-    );
-    ui.painter().text(
-        pos2(tile.right() + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        &name,
-        egui::FontId::proportional(font_size::LARGE),
-        color(p.text_primary),
-    );
-    if let Some(chevron) = nodalia_theme::icons::get("chevron-down") {
-        let r =
-            Rect::from_center_size(pos2(rect.right() - 16.0, rect.center().y), vec2(14.0, 14.0));
-        nodalia_theme::icons::paint(
-            ui.painter(),
-            r,
-            chevron,
-            nodalia_theme::icons::Style::bold(color(p.text_secondary)),
-        );
-    }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Workspaces")));
-    egui::Popup::menu(&response).show(|ui| {
-        ui.set_min_width(rect.width() - 8.0);
+    ent::workspace_switcher(ui, look, &name, tr("Workspaces"), |ui| {
         ui.label(
             RichText::new(tr("Workspaces"))
                 .size(font_size::CAPTION)
@@ -483,8 +314,10 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
         for w in &model.workspaces {
             let (unread, mentions) = model.workspace_unread(w.id);
             let selected = model.workspace == Some(w.id);
-            let (row, response) = ui
-                .allocate_exact_size(vec2((rect.width() - 24.0).max(200.0), 36.0), Sense::click());
+            let (row, response) = ui.allocate_exact_size(
+                vec2((ent::layout::SIDEBAR - 40.0).max(200.0), 36.0),
+                Sense::click(),
+            );
             let fill = if selected {
                 color(p.accent_subtle)
             } else if response.hovered() {
@@ -575,101 +408,25 @@ fn workspace_switcher(ui: &mut Ui, model: &Model, look: &Look, actions: &mut Vec
     });
 }
 
-fn section(
-    ui: &mut Ui,
-    look: &Look,
-    title: &str,
-    can_add: bool,
-    add_label: &str,
-    on_add: impl FnOnce(),
-) {
-    ui.horizontal(|ui| {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(title)
-                .size(font_size::SMALL)
-                .strong()
-                .color(color(look.palette.text_secondary)),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if can_add && icon_button(ui, look, "plus", add_label, false).clicked() {
-                on_add();
-            }
-        });
-    });
-}
-
-enum RowIcon {
-    Icon(&'static str),
-    Avatar(i64, Option<bool>),
-}
-
-#[allow(clippy::too_many_arguments)]
+/// A sidebar row for a channel or a direct message: the name in the strong face when something
+/// is unread, with the mention count in the accent or the unread count quiet.
 fn channel_row(
     ui: &mut Ui,
     look: &Look,
-    kind: RowIcon,
-    name: &str,
+    row: Row<'_>,
     selected: bool,
     unread: u32,
     mentions: u32,
-    muted: bool,
 ) -> egui::Response {
-    let p = &look.palette;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-    let fill = if selected {
-        color(p.accent_subtle)
-    } else if response.hovered() {
-        color(p.control_bg_hover)
+    let count = if mentions > 0 {
+        Count::Strong(mentions)
     } else {
-        Color32::TRANSPARENT
+        Count::Quiet(unread)
     };
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(layout::CONTROL_RADIUS), fill);
-    if response.has_focus() {
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(layout::CONTROL_RADIUS),
-            Stroke::new(2.0, color(p.border_focus)),
-            egui::StrokeKind::Inside,
-        );
-    }
-    let strong = unread > 0 && !selected;
-    let ink = if selected {
-        color(p.accent_text)
-    } else if muted {
-        color(p.text_tertiary)
-    } else if strong {
-        color(p.text_primary)
-    } else {
-        color(p.text_secondary)
-    };
-    let mut child = ui.new_child(
-        UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(8.0, 0.0)))
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    match kind {
-        RowIcon::Icon(name) => {
-            icon(&mut child, name, 16.0, ink);
-        }
-        RowIcon::Avatar(seed, online) => avatar(&mut child, look, seed, name, 20.0, online),
-    }
-    child.add_space(6.0);
-    let mut text = RichText::new(name).color(ink);
-    if strong || selected {
-        text = text.strong();
-    }
-    child.add(egui::Label::new(text).truncate().selectable(false));
-    child.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if mentions > 0 {
-            badge(ui, look, mentions, true);
-        } else if unread > 0 && !selected {
-            badge(ui, look, unread, false);
-        }
-    });
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, name));
-    response
+    row.selected(selected)
+        .bold(unread > 0)
+        .count(count)
+        .show(ui, look)
 }
 
 // --- Conversation ------------------------------------------------------------------------------
@@ -1840,37 +1597,6 @@ fn context_panel(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &
     }
 }
 
-fn panel_header(ui: &mut Ui, look: &Look, title: &str, closable: bool, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
-        ui.set_height(44.0);
-        ui.add_space(14.0);
-        ui.label(
-            RichText::new(title)
-                .size(font_size::LARGE)
-                .strong()
-                .color(color(look.palette.text_primary)),
-        );
-        if closable {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(8.0);
-                let (rect, _) =
-                    ui.allocate_exact_size(vec2(layout::CLOSE, layout::CLOSE), Sense::hover());
-                if cr::close_button(ui, look, rect, Id::unique(("close-panel", title))) {
-                    actions.push(Action::ClosePanel);
-                }
-            });
-        }
-    });
-    let y = ui.min_rect().bottom();
-    ui.painter().line_segment(
-        [
-            pos2(ui.max_rect().left(), y),
-            pos2(ui.max_rect().right(), y),
-        ],
-        Stroke::new(1.0, color(look.palette.border_subtle)),
-    );
-}
-
 fn thread_panel(ui: &mut Ui, main: &mut Main, look: &Look, now: f64, actions: &mut Vec<Action>) {
     panel_header(ui, look, tr("Thread"), true, actions);
     let Some(thread) = main.model.thread.clone() else {
@@ -2260,30 +1986,7 @@ fn encryption(ui: &mut Ui, main: &Main, look: &Look, channel: ChannelId) {
 // --- Toasts and time -------------------------------------------------------------------------------
 
 pub fn toasts(ui: &mut Ui, app: &App, look: &Look) {
-    let p = &look.palette;
-    let full = ui.max_rect();
-    let mut y = full.bottom() - 24.0;
-    for toast in app.toasts.iter().rev() {
-        let galley = ui.painter().layout(
-            toast.text.clone(),
-            egui::FontId::proportional(font_size::BODY),
-            color(p.text_inverse),
-            340.0,
-        );
-        let size = galley.size() + vec2(28.0, 18.0);
-        let rect = Rect::from_min_size(pos2(full.center().x - size.x / 2.0, y - size.y), size);
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            Id::unique("toasts"),
-        ));
-        painter.rect_filled(rect, CornerRadius::same(12), color(p.surface_inverse));
-        painter.galley(
-            rect.min + vec2(14.0, 9.0),
-            Arc::clone(&galley),
-            color(p.text_inverse),
-        );
-        y = rect.top() - 8.0;
-    }
+    ent::toasts(ui, look, app.toasts.iter().map(|t| t.text.as_str()));
 }
 
 fn local(at: Timestamp) -> Option<chrono::DateTime<chrono::Local>> {
@@ -2305,6 +2008,12 @@ pub fn date(at: Timestamp) -> String {
     local(at)
         .map(|t| t.format("%d/%m/%Y").to_string())
         .unwrap_or_default()
+}
+
+fn panel_header(ui: &mut Ui, look: &Look, title: &str, closable: bool, actions: &mut Vec<Action>) {
+    if ent::panel_header(ui, look, title, closable) {
+        actions.push(Action::ClosePanel);
+    }
 }
 
 #[cfg(test)]
