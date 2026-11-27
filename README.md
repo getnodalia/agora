@@ -219,9 +219,9 @@ and what is still moving to Nodalia Design is in [`NODALIA_MIGRATION.md`](NODALI
 
 ## App icon
 
-Socrates, who did his philosophy in conversation with whoever he met in the agora of Athens. The
-portrait comes from a photograph of the marble bust in the Louvre, cut out in black and white on
-Ágora's teal like every Nodalia app icon. Sources, sizes and licence are in
+Alexander Graham Bell, who made the voice travel down a wire and so started the long history of
+talking at a distance. The portrait comes from a photograph in the Smithsonian Institution
+Archives, cut out in black and white on Ágora's teal like every Nodalia app icon. Sources, sizes and licence are in
 [ATTRIBUTION.md](ATTRIBUTION.md).
 
 ## The Nodalia suite

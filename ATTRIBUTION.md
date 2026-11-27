@@ -5,7 +5,7 @@ Every asset in this repository, with its author, source and licence. Code is `MI
 
 | Path | What | Author | Source | Licence |
 |---|---|---|---|---|
-| `assets/icons/agora-portrait-1024.png` | App icon artwork: Socrates, cut out in black and white on Ágora's teal | Nodalia, from a photograph of the marble bust of Socrates in the Louvre (Roman copy, 1st c., of a Greek original) by Eric Gaba (User:Sting), July 2005 | [Wikimedia Commons: Socrates Louvre.jpg](https://commons.wikimedia.org/wiki/File:Socrates_Louvre.jpg); made with nodalia-design `tools/app-portrait` | Photograph: public domain (released by its author). Artwork: MIT OR Apache-2.0 |
+| `assets/icons/agora-portrait-1024.png` | App icon artwork: Alexander Graham Bell, cut out in black and white on Ágora's teal | Nodalia, from a portrait photograph of Bell (unidentified photographer, before 1922) held by the Smithsonian Institution Archives | [Wikimedia Commons: Portrait of Alexander Graham Bell.jpg](https://commons.wikimedia.org/wiki/File:Portrait_of_Alexander_Graham_Bell.jpg); made with nodalia-design `tools/app-portrait` | Photograph: public domain (published before 1931 in the United States). Artwork: MIT OR Apache-2.0 |
 | `assets/icons/hicolor/*/apps/dev.danielmiguelt.Agora.png` | App icon at each size (rounded tile of the artwork above) | Nodalia | made from the artwork above | MIT OR Apache-2.0 |
 | `docs/screenshots/*.png` | Screenshots of Ágora with demo accounts and messages | Nodalia | taken from the running app | MIT OR Apache-2.0 |
 | `packaging/linux/dev.danielmiguelt.Agora.desktop` | Desktop entry | Nodalia | original work | MIT OR Apache-2.0 |

@@ -1,5 +1,5 @@
-//! The app icon: Socrates, from a public-domain photograph of the Louvre bust (Eric Gaba,
-//! Wikimedia Commons), in black and white on Ágora's teal. The same PNG is the window icon and
+//! The app icon: Alexander Graham Bell, from a public-domain photograph (Smithsonian
+//! Institution Archives, via Wikimedia Commons), in black and white on Ágora's teal. The same PNG is the window icon and
 //! the logo drawn in the app.
 
 use egui::{ColorImage, TextureHandle, TextureOptions};
@@ -9,7 +9,8 @@ const PNG: &[u8] =
     include_bytes!("../../../assets/icons/hicolor/256x256/apps/dev.danielmiguelt.Agora.png");
 
 /// Who the portrait is and where it comes from, for About.
-pub const CREDIT: &str = "Icon: Socrates, Louvre bust (photo: Eric Gaba, public domain).";
+pub const CREDIT: &str =
+    "Icon: Alexander Graham Bell (photo: Smithsonian Institution Archives, public domain).";
 
 /// Decode the icon into RGBA pixels: `(width, height, rgba)`.
 pub fn rgba() -> Option<(u32, u32, Vec<u8>)> {
